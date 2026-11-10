@@ -3,6 +3,24 @@
 Newest first. Each entry: what we saw (symptom) → why (cause) → what fixed it.
 Fixes in ps3recomp itself are marked **[runtime]**.
 
+## 2026-11-10: first boot, past the C runtime start-up
+
+- Run: `build\civrev.exe <EBOOT.elf>`. With no argument it prints usage and exits
+  (code 2). Double-clicking it shows nothing for that reason.
+- Symptom: null reads at `NULL+0x47B4` in `func_013D1870` right after start-up,
+  then an infinite recursion and a stack overflow.
+- Cause: r2 (TOC) became 0 inside `func_013D2A90` (a run-once helper). Its first
+  import call in a fresh frame is `sys_lwmutex_lock`. ps3recomp registers that
+  import (and `sys_lwmutex_unlock`) as a "fast" HLE call, which returns before
+  writing the caller's TOC slot `0x28(r1)`. The caller then reloads `r2 = [r1+0x28]`
+  = 0. Proven with temporary r2 prints at each restore point.
+- Fix: `tools/fix_import_stub_toc.py` (run by `relift.ps1`) makes each lifted import
+  stub do `std r2,40(r1)` first, like the real PS3 stub. 223 stubs.
+  Candidate upstream fix: write the slot in ps3_hle_call's fast path too.
+- Result: no null reads, no crash. The D3D12 window opens and the game runs until
+  it tries to open `/dev_bdvd/PS3_GAME/USRDIR/Resource/*.FPK`, which fails because
+  the disc isn't extracted yet.
+
 ## 2026-11-10: first full build, civrev.exe links
 
 `build.ps1 -- -k 0`: **0 errors, 4.2 min** (16 threads), `build\civrev.exe` = 243.5 MB.

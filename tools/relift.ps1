@@ -59,6 +59,9 @@ Step "3/5 lift PPU code to C++" {
         --code-end $CodeEnd `
         --chunks $Chunks `
         -o src\recomp
+    if ($LASTEXITCODE -ne 0) { return }
+    # Import stubs must save r2 like the real PS3 stub (see the tool's docstring).
+    & $py "$PSScriptRoot\fix_import_stub_toc.py" src\recomp
 }
 Step "4/5 HLE NID -> handler table" {
     Remove-Item -Recurse -Force src\gen -ErrorAction SilentlyContinue
