@@ -25,6 +25,8 @@ spu_miss/
 # Game files, keys, assets -- never commit
 game/
 vfs/
+# Emulated PS3 hard disk the game writes (your save files)
+gamedata/
 *.elf
 *.ELF
 *.BIN
