@@ -3,6 +3,13 @@
 Newest first. Each entry: what we saw (symptom) → why (cause) → what fixed it.
 Fixes in ps3recomp itself are marked **[runtime]**.
 
+## 2026-11-10: first match running ("Gioca ora" → 3D world map)
+
+- Symptom: right after the match loading screen, the game crashed (null reads in `func_00A60D20`), always just after `unresolved NID 0xA121A224` and `0x13AE18F3`.
+- Cause: each frame the game starts 2 frustum-culling SPU tasks (image 1, `spu_0000_at_01764A80`) and binds a 128-byte exit-code container to each with `cellSpursTaskAttributeSetExitCodeContainer` (`0xA121A224`). Each task ends with `cellSpursTaskExit(visible_count)` (SPU func `0x3900`: the count goes in the first word of the syscall argument at LS `0x2FD0`, then syscall 0). The PPU (`func_00AA741C`) reads every count with `cellSpursTaskExitCodeGet(container, &count)` (`0x13AE18F3`) and uses it unchecked. ps3recomp had neither function and never kept a task's exit code, so the game read garbage.
+- Fix (**[runtime]**, branch `fix/rsx-array-element`): the EXIT syscall records `LS[0x2FD0]` (`spu_channels.c`); when the task ends, `spu_workload.c` writes the code into the container bound by `cellSpursCreateTaskWithAttribute`, and into the Taskset2 exit array instead of 0. New `cellSpursTaskAttributeSetExitCodeContainer` and `cellSpursTaskExitCodeGet` (waits for the task) in `libs/spurs/cellSpurs.c`. `cellSpursTaskExitCodeTryGet` is left out: the game doesn't import it.
+- Result: 0 unresolved NIDs, 0 null reads. Real counts every frame (`task 0 ... exited code=0x00000140 -> container 0x111E9E00`, then `0x142`, `0x13C`, ...). "Gioca ora" goes straight into a match: 3D world map, Rome, Warriors, advisor and HUD, about 27-40 FPS, still running after 60 s.
+
 ## 2026-11-10: 3D Leader Selection (Mao Zedong) & Match Loading reached; SPU `.ctors` lifted; next blocker traced to `cellSpursTaskExitCodeGet`
 
 - Symptom 1 (missing menu UI): pressing `Enter` on the keyboard advanced past "Press START" into the main menu and played menu confirm sounds, but all menu panels, buttons, and selection highlights were invisible (`groups[seen=8651 exec=8651 empty=82376]`, `textures[cached=4/1024]`).
@@ -11,8 +18,8 @@ Fixes in ps3recomp itself are marked **[runtime]**.
 - Result 1: `groups[empty]` dropped from **82,376 → 0** (`groups[seen=23003 exec=23003 empty=0]`, `textures[cached=27/1024]`). Title banner ("PREMI START") and all main menu panels, buttons ("Giocatore singolo / Multigiocatore / Gioca ora / Extra / Opzioni"), and selection highlights render cleanly.
 
 - Symptom 2 (PhysX queue entries reading as all zeros): popped 16-byte entries from `0x01B72900` were all zero.
-- Cause 2: SPU image 9 (`spu_0008_at_0183EB80`, `spu_func_000018E8`/`00001DF0`) checks `q[+0x10]` (`m_direction <= 2`), reads entry `size` at `q[+0x14]`, `depth` at `q[+0x18]`, and `buf_ea` at `q[+0x08]` (u64 BE). Upstream `_cellSpursQueueInitialize` (`libs/spurs/cellSpurs.c:3409`) wrote `size` at `+0x10` (making SPU reject push with `0x80410902` `CELL_SPURS_TASK_ERROR_INVAL` before DMA) and `buf_ea` at `+0x18`.
-- Fix 2: `src/port/civrev_hle.cpp` overrides `_cellSpursQueueInitialize` (`0x082BFB09`) with Sony's BE `CellSpursQueue` header layout (`+0x08` u64 `buf_ea`, `+0x10` u32 `direction`, `+0x14` u32 `size`, `+0x18` u32 `depth`, `+0x0C` u32 `depth` mirror) and updates `civrev_CellSpursQueuePopBody` (`0x91066667`). Also added handlers for `cellSpursQueueDetachLv2EventQueue` (`0x039D70B7`), `_sys_spu_printf_initialize` (`0x45FE2FCE`), `_sys_spu_printf_finalize` (`0xDD0C1E09`), `cellAudioSetPortLevel` (`0x56DFE179`), and `inet_addr` (`0xDABBC2C0`).
+- Cause 2: the PhysX SPU task (image 9, `spu_0008_at_0183EB80`, push code around `0x6C1C`-`0x7088`) reads the queue header as `+0x08` u32 entry size, `+0x0C` u32 depth, `+0x10` u64 buffer EA, `+0x18` event port, `+0x1C` direction. Upstream `_cellSpursQueueInitialize` used CellSyncLFQueue's offsets (`+0x10` size, `+0x18` buffer EA), so the SPU read size 0 and copied nothing.
+- Fix 2: `src/port/civrev_hle.cpp` overrides `_cellSpursQueueInitialize` (`0x082BFB09`) with that layout (see the comment block in the file) and updates `civrev_CellSpursQueuePopBody` (`0x91066667`). Also added handlers for `cellSpursQueueDetachLv2EventQueue` (`0x039D70B7`), `_sys_spu_printf_initialize` (`0x45FE2FCE`), `_sys_spu_printf_finalize` (`0xDD0C1E09`), `cellAudioSetPortLevel` (`0x56DFE179`), and `inet_addr` (`0xDABBC2C0`).
 - Result 2: PhysX SPU tasks now DMA real 16-byte result payloads (`01BA7844 00000000 ...`) into `0x01B72900`; 0 unresolved NIDs fire through the title screen and main menu.
 
 - Symptom 3 (SPU abort on entering "Gioca ora"): pressing `Enter` on "Gioca ora" ("Play now") aborted `image=6` (`spu_0005_at_017A9F80.elf`, 325 KB PhysX solver task): `[spu] img=6 branched into unlifted LS 0x20190 (lr=0x20150) -- ending the job`.

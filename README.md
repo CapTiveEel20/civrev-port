@@ -5,8 +5,10 @@ with [ps3recomp](https://github.com/sp00nznet/ps3recomp). The project layout fol
 [sp00nznet/tornado](https://github.com/sp00nznet/tornado).
 
 **Status:** boots through C runtime start-up, opens the D3D12 window and reads the
-disc archives, runs PhysX on the SPU task system and reaches the animated "Press
-START" title screen with clean music. Input and gameplay are untested.
+disc archives, runs PhysX on the SPU task system, draws the title screen and main
+menu, and starts a match from "Gioca ora" (Play now): the 3D world map, units, city
+and HUD render at roughly 25-40 FPS. Keyboard: Enter = START, arrows = d-pad,
+Z = Cross. Some 3D models still render imperfectly; gameplay is barely tested.
 See [docs/progress.md](docs/progress.md) and [docs/feasibility.md](docs/feasibility.md).
 
 ## Requirements
