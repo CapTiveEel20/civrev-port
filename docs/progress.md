@@ -3,6 +3,30 @@
 Newest first. Each entry: what we saw (symptom) → why (cause) → what fixed it.
 Fixes in ps3recomp itself are marked **[runtime]**.
 
+## 2026-11-10: PhysX gets past SPURS program loading
+
+- `PhysX: Error allocating memory for overlay table: 0 0`. PhysX calls
+  `cellOvisGetOverlayTableSize(spuElf)` (guest `0x00FED62C`) and reads the size
+  from the return value. ps3recomp's stub (`libs/misc/cellOvis.c`) has a different
+  signature, `(filePath, u32* tableSize)`, and needs a `cellOvisInit` the game never
+  calls, so it returns `0x80410701`. PhysX reads that as a ~2 GB size and the
+  allocation fails. Trace: `PS3_HLE_ARGS=82F294B2` → `r3=0x0184EB80` (an SPU ELF),
+  `r4=0`. None of the 9 SPU images has an `.ovtab` section, so the right answer is 0.
+  Fix: `src/port/civrev_hle.cpp` registers a ctx handler for NID `0x82F294B2`
+  (ctx handlers are dispatched before the generic table) that returns 0 and warns
+  if an ELF ever does have overlays.
+- Next: `[ppu] FATAL: stuck calling 0x00FC2EA8`. 108 hand-written routines
+  (`0x00FBABE0`-`0x00FC41A8`, likely PhysX) are reached only through **inline**
+  function descriptors `{code=desc+8, toc=0}` inside `.text`. The loader builds its
+  function list from `.opd`, so it merged all of them into `0x00FB94F0` and the
+  lifter never emitted them. Fix: `tools/fix_inline_opd_funcs.py` (run by
+  `relift.ps1` step 1) splits them out: 63,606 → 63,714 entries, 80,330 → 80,495
+  lifted functions.
+- Now runs > 60 s. PhysX creates SPURS queues and tasks, then stops with
+  `PhysX: Error starting spurs task: 0x80410904` (`CELL_SPURS_TASK_ERROR_NOMEM`)
+  after creating 256 tasks for the same SPU program. Also unimplemented:
+  `cellSpursQueuePopBody` (`0x91066667`, 35 calls), `inet_addr`, `_sys_spu_printf_initialize`.
+
 ## 2026-11-10: first readable screen ("Caricamento...")
 
 - With the default D3D12 backend the window shows one line of text at the bottom,

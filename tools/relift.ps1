@@ -46,6 +46,9 @@ New-Item -ItemType Directory -Force analysis | Out-Null
 
 Step "1/5 load ELF (functions, imports, TOC)" {
     & $py "$tools\ppu_loader.py" $Elf -o analysis
+    if ($LASTEXITCODE -ne 0) { return }
+    # Hand-written routines reached only via inline descriptors (see the tool's docstring).
+    & $py "$PSScriptRoot\fix_inline_opd_funcs.py" $Elf analysis\EBOOT.functions.json
 }
 Step "2/5 name imports (for reading only)" {
     & $py "$tools\gen_imports.py" $Elf -o analysis\imports_named.json

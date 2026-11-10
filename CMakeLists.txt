@@ -55,6 +55,7 @@ add_executable(civrev
     "${PS3RECOMP_DIR}/runtime/ppu/ppu_hle.cpp"           # NID -> handler dispatch
     "${PS3RECOMP_DIR}/runtime/ppu/ppu_sysprx.cpp"        # boot-critical CRT
     "${PS3RECOMP_DIR}/runtime/ppu/ppu_fs.cpp"            # cellFs virtual file system
+    "src/port/civrev_hle.cpp"                            # hand-written Civ Rev HLE overrides
     ${GEN_SOURCES}
     ${SPU_SOURCES}
     ${RECOMP_SOURCES}
