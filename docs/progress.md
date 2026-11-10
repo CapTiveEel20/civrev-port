@@ -3,6 +3,31 @@
 Newest first. Each entry: what we saw (symptom) → why (cause) → what fixed it.
 Fixes in ps3recomp itself are marked **[runtime]**.
 
+## 2026-11-10: title screen runs, music plays cleanly
+
+- Symptom (seen by eye): "Press START" screen with music, but the clouds froze after
+  about a second and the music stuttered. `AUDIO_RATE=1`: host output fine (0
+  underruns), but the game's sound engine (Miles, a PPU thread) left 3-23 holes per 5 s.
+  816 s of CPU in 60 s: 16 cores busy with 165 threads.
+- Cause: PhysX starts one SPURS task per job; each task pushes a 16-byte result into
+  an SPU->PPU queue (`0x01B72880`, depth 128) and exits. The PPU collects results with
+  `_cellSpursQueuePopBody` (NID `0x91066667`), which ps3recomp doesn't implement, so
+  it returned 0 ("got one") without removing anything. After 128 results the queue was
+  full (`[spu-spin] ... GETLLAR ea=0x01B72880 line: 00000000 00000080 00000000 00000080`
+  = read 0, write 128, depth 128). Every later task spun forever on its push (256
+  started, 128 finished), PhysX ran out of task slots (`Error starting spurs task
+  0x80410904`), the game called `sys_prx_exitspawn_with_level` and its loop stopped.
+- Fix: `src/port/civrev_hle.cpp` implements the pop on ps3recomp's queue ring model
+  (`+0x00` read index, `+0x04` write index, `+0x0C` depth, `+0x10` entry size, `+0x18`
+  buffer; indices mod 2*depth). Under `spu_lockline_lock` it must touch guest memory
+  directly: `vm_write*` takes that (non-recursive) lock itself on a line an SPU has
+  reserved, and the first version deadlocked the game that way.
+- Result (60 s): 3,065 tasks started / 3,064 finished, 0 spinning, 71 s CPU (~1.2
+  cores), 37 threads, audio holes 0 and 0 % silence, no PhysX error, clouds keep moving
+  (screenshots 3 s apart: 99.6 % of the sky changed).
+- Open: the popped entries read as all zeros; PhysX accepts them, but it is not yet
+  confirmed that the SPU side writes its results into the slot this ring model reads.
+
 ## 2026-11-10: PhysX gets past SPURS program loading
 
 - `PhysX: Error allocating memory for overlay table: 0 0`. PhysX calls

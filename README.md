@@ -5,8 +5,8 @@ with [ps3recomp](https://github.com/sp00nznet/ps3recomp). The project layout fol
 [sp00nznet/tornado](https://github.com/sp00nznet/tornado).
 
 **Status:** boots through C runtime start-up, opens the D3D12 window and reads the
-disc archives, gets PhysX through SPU program loading, then stops at PhysX:
-"Error starting spurs task" (SPU task system; `cellSpursQueuePopBody` is missing).
+disc archives, runs PhysX on the SPU task system and reaches the animated "Press
+START" title screen with clean music. Input and gameplay are untested.
 See [docs/progress.md](docs/progress.md) and [docs/feasibility.md](docs/feasibility.md).
 
 ## Requirements
@@ -46,7 +46,7 @@ Double-click `run.bat`. It sets `PS3_VFS_ROOT` to `..\civrev-gamefiles\vfs`, sta
 | `run.bat` | Starts the game with the folder layout above |
 | `tools/fix_import_stub_toc.py` | Post-lift fix: import stubs save r2 like the real PS3 stub (run by `relift.ps1`) |
 | `tools/fix_inline_opd_funcs.py` | Pre-lift fix: adds 108 hand-written routines reached only via inline descriptors (run by `relift.ps1`) |
-| `src/port/civrev_hle.cpp` | Civ Rev-specific HLE overrides (correct `cellOvisGetOverlayTableSize`) |
+| `src/port/civrev_hle.cpp` | Civ Rev-specific HLE overrides (`cellOvisGetOverlayTableSize`, `_cellSpursQueuePopBody`) |
 | `tools/relift.ps1` | Runs the ps3recomp pipeline on your EBOOT: loader, PPU lifter, HLE table, SPU lifter |
 | `tools/import_coverage.py` | Checks the game's firmware imports against ps3recomp's handlers |
 | `src/compat/` | POSIX header shims for Windows |
