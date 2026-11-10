@@ -68,17 +68,21 @@ handler behaves correctly for this game.
 
 ### Missing functions, by priority
 **Must implement (affect boot, graphics or game logic):**
-- `cellSpurs`: `cellSpursQueuePopBody` (0x91066667), `cellSpursQueueDetachLv2EventQueue` (0x039D70B7),
-  `cellSpursTaskExitCodeGet` (0x13AE18F3), `cellSpursTaskAttributeSetExitCodeContainer` (0xA121A224).
-  The queue functions are probably the PPU side of PhysX's SPURS queues.
+- `cellSpurs`:
+  - `cellSpursQueuePopBody` (0x91066667 — **implemented in `src/port/civrev_hle.cpp`** along with `_cellSpursQueueInitialize` 0x082BFB09 Sony BE header layout override),
+  - `cellSpursQueueDetachLv2EventQueue` (0x039D70B7 — **implemented in `src/port/civrev_hle.cpp`**),
+  - `cellSpursTaskExitCodeGet` (0x13AE18F3) & `cellSpursTaskAttributeSetExitCodeContainer` (0xA121A224) — **used by Firaxis's `CIV_REVSPURS` frustum culling SPU task (`image=1`, `spu_0000_at_01764A80.elf`) to return the visible object count (`LS[0x2FD0]`) to PPU `func_00AA741C` at match entry**.
 - `cellResc`: `cellRescSetWaitFlip` (0x0D3C22CE), `cellRescGcmSurface2RescSrc` (0x01220224),
   `cellRescVideoOutResolutionId2RescBufferMode` (0xD1CA0503). These belong to the display output scaler.
 - `cellGcmSys`: `_cellGcmFunc15` (0x3A33C1FD). This is an internal GCM helper.
-- `cellOvis`: `cellOvisInitializeOverlayTable` (0xA876C911). It sets up SPU overlays and needs investigating.
+- `cellOvis`: `cellOvisInitializeOverlayTable` (0xA876C911). Sets up SPU overlays; not called now that
+  `cellOvisGetOverlayTableSize` (0x82F294B2) is overridden in `src/port/civrev_hle.cpp` to return 0
+  (none of the 9 SPU ELFs has an `.ovtab` section).
 
 **Easy (a small handler that just succeeds or does something trivial):**
-- `cellAudio`: `cellAudioSetPortLevel` (0x56DFE179). Sets volume.
-- `sysPrxForUser`: `_sys_spu_printf_initialize` / `_sys_spu_printf_finalize`. SPU debug printing.
+- `cellAudio`: `cellAudioSetPortLevel` (0x56DFE179 — **implemented in `src/port/civrev_hle.cpp`**). Sets volume.
+- `sysPrxForUser`: `_sys_spu_printf_initialize` (0x45FE2FCE) / `_sys_spu_printf_finalize` (0xDD0C1E09) — **implemented in `src/port/civrev_hle.cpp`**. SPU debug printing.
+- `sys_net`: `inet_addr` (0xDABBC2C0 — **implemented in `src/port/civrev_hle.cpp`**).
 
 **Can stay offline or no-device:**
 - `cellMic`: 5 unnamed NIDs (0x05709BBF, 0x65336418, 0x6BC46AAB, 0x7903400E, 0xB2C16321).

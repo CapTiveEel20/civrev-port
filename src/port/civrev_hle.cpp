@@ -63,25 +63,23 @@ static void civrev_ovis_get_overlay_table_size(ppu_context* ctx)
 }
 
 /* ---------------------------------------------------------------------------
- * cellSpurs: int _cellSpursQueuePopBody(CellSpursQueue* q, void* buffer,
- *                                       unsigned isPeek, unsigned isBlocking)
- *                                                               NID 0x91066667
+ * cellSpurs queue layout (128-byte big-endian line, 128-byte aligned)
  *
- * PhysX starts one SPURS task per job; each task pushes a 16-byte result into
- * an SPU->PPU queue and exits. The PPU collects results with this call (guest
- * 0x00FECF68 blocking, 0x00FED000 polling: it expects 0x80410901 AGAIN when
- * empty). ps3recomp v0.19.0 has no handler, so the import returned 0 ("got
- * one") without removing anything. The read index never moved, the 128-entry
- * queue filled, every later task spun forever on its push (GETLLAR loop on the
- * queue line), PhysX ran out of task slots ("Error starting spurs task
- * 0x80410904") and the game gave up -- with ~128 spinning threads starving
- * the audio thread on the way.
+ * Derived directly from the recompiled SPU task code in spu_0008_at_0183EB80
+ * (spu_func_00006C1C..0x7088 = cellSpursQueuePushBegin/End, 0x7398..0x7580):
+ *   +0x00  s32 pop index   (~v while a pop is in progress; mod 2*depth)
+ *   +0x04  s32 push index  (~v while a push DMA is in flight; mod 2*depth)
+ *   +0x08  u32 entry size  (read at 0x6F04: rotqbyi(line0, 8) -> MFC_Size)
+ *   +0x0C  u32 depth       (read at 0x6C1C: rotqbyi(line0, 12) -> ring modulus)
+ *   +0x10  u64 buffer EA   (read at 0x6F04: line1 + slot*size -> MFC_EAH/EAL)
+ *   +0x18  s32 event port  (read at 0x7088: -1 when no PPU event port attached)
+ *   +0x1C  u32 direction   (read at 0x6C1C: 2 = PPU2SPU rejects SPU push)
+ *   +0x20..+0x5F           waiter rings (0 when empty)
+ *   +0x60  u64 owner EA    (read at 0x7438: compared with taskset EA at 0x1C0)
  *
- * Queue line layout (big-endian, 128-byte aligned), the ring model ps3recomp's
- * own _cellSpursQueueInitialize / cellSpursQueueSize / cellSpursQueuePushBody
- * use: +0x00 pop index, +0x04 push index (a negative value ~v marks an
- * operation in progress on v), +0x0C ring modulus = depth, +0x10 entry size,
- * +0x18 buffer EA. Indices run modulo 2*depth; the slot is index % depth.
+ * ps3recomp's _cellSpursQueueInitialize copied CellSyncLFQueue's offsets (+0x10
+ * size, +0x18 buffer_ea), so the SPU read +0x08 size = 0 and DMA'd 0 bytes to
+ * EA 0x10_00000080, leaving all popped entries at 0x01B72900 zero.
  * ------------------------------------------------------------------------- */
 extern "C" {
 extern uint8_t* vm_base;   /* host base of guest memory */
@@ -111,17 +109,48 @@ static const uint32_t SPURS_TASK_ERROR_INVAL        = 0x80410902u;
 static const uint32_t SPURS_TASK_ERROR_ALIGN        = 0x80410910u;
 static const uint32_t SPURS_TASK_ERROR_NULL_POINTER = 0x80410911u;
 
+static void civrev_spurs_queue_init(ppu_context* ctx)
+{
+    const uint32_t spurs   = (uint32_t)ctx->gpr[3];
+    const uint32_t taskset = (uint32_t)ctx->gpr[4];
+    const uint32_t q       = (uint32_t)ctx->gpr[5];
+    const uint32_t buf     = (uint32_t)ctx->gpr[6];
+    const uint32_t size    = (uint32_t)ctx->gpr[7];
+    const uint32_t depth   = (uint32_t)ctx->gpr[8];
+    const uint32_t dir     = (uint32_t)ctx->gpr[9];
+    if (!q || !buf)        { ctx->gpr[3] = (int64_t)(int32_t)SPURS_TASK_ERROR_NULL_POINTER; return; }
+    if (!size || !depth)   { ctx->gpr[3] = (int64_t)(int32_t)SPURS_TASK_ERROR_INVAL; return; }
+    if (q & 0x7F)          { ctx->gpr[3] = (int64_t)(int32_t)SPURS_TASK_ERROR_ALIGN; return; }
+
+    for (uint32_t o = 0; o < 128; o += 4) vm_write32(q + o, 0);
+    vm_write32(q + 0x08, size);
+    vm_write32(q + 0x0C, depth);
+    vm_write64(q + 0x10, (uint64_t)buf);
+    vm_write32(q + 0x18, 0xFFFFFFFFu); /* no PPU event port attached */
+    vm_write32(q + 0x1C, dir);
+    vm_write64(q + 0x60, (uint64_t)(taskset ? taskset : spurs));
+    vm_write64(q + 0x70, (uint64_t)(taskset ? taskset : spurs));
+    memset(vm_base + buf, 0, (size_t)size * depth);
+
+    fprintf(stderr, "[civrev] _cellSpursQueueInitialize(taskset=0x%08X q=0x%08X buf=0x%08X size=%u depth=%u dir=%u)\n",
+            taskset, q, buf, size, depth, dir);
+    ctx->gpr[3] = 0;
+}
+
 static uint32_t spurs_queue_try_pop(uint32_t q, uint32_t buf, int peek)
 {
     static std::atomic<int> s_logged{0};
     spu_lockline_lock();   /* the SPU side updates this line with GETLLAR/PUTLLC under the same lock */
     const int32_t  w0   = (int32_t)raw_be32(q + 0x00);
     const int32_t  w1   = (int32_t)raw_be32(q + 0x04);
+    const uint32_t size = raw_be32(q + 0x08);
     const int32_t  mod  = (int32_t)raw_be32(q + 0x0C);
-    const uint32_t size = raw_be32(q + 0x10);
-    const uint32_t data = raw_be32(q + 0x1C);   /* low word of the u64 buffer EA at +0x18 */
+    const uint32_t data = raw_be32(q + 0x14);   /* low word of the u64 buffer EA at +0x10 */
     if (mod <= 0 || !size || size > 0x4000 || !data) { spu_lockline_unlock(); return SPURS_TASK_ERROR_INVAL; }
 
+    /* While an SPU push DMA is in flight, PushBegin stores ~push at +0x04 and
+     * PushEnd commits (push + 1) % (2*mod) only after the DMA tag completes.
+     * So ~w1 (when w1 < 0) is the uncommitted index before the in-flight push. */
     const int32_t pop  = w0 < 0 ? ~w0 : w0;
     const int32_t push = w1 < 0 ? ~w1 : w1;
     const int32_t n    = push >= pop ? push - pop : push - pop + 2 * mod;
@@ -155,7 +184,7 @@ static void civrev_spurs_queue_pop_body(ppu_context* ctx)
         if (s_calls.fetch_add(1) < 12)
             fprintf(stderr, "[civrev] QueuePop call q=0x%08X peek=%d blocking=%d line=%08X %08X %08X %08X size=%u buf=0x%08X lr=0x%08X\n",
                     q, peek, blocking, vm_read32(q), vm_read32(q + 4), vm_read32(q + 8), vm_read32(q + 12),
-                    vm_read32(q + 0x10), (uint32_t)vm_read64(q + 0x18), (uint32_t)ctx->lr);
+                    vm_read32(q + 0x08), (uint32_t)vm_read64(q + 0x10), (uint32_t)ctx->lr);
         rc = spurs_queue_try_pop(q, buf, peek);
         /* Blocking: the real call sleeps on the queue's lv2 event queue until a
          * task pushes. Poll instead; results arrive within a few ms. */
@@ -177,14 +206,63 @@ static void civrev_spurs_queue_pop_body(ppu_context* ctx)
     ctx->gpr[3] = (uint64_t)(int64_t)(int32_t)rc;
 }
 
+/* ---------------------------------------------------------------------------
+ * Trivial / offline stubs for unresolved imports
+ * ------------------------------------------------------------------------- */
+static void civrev_return_ok(ppu_context* ctx)
+{
+    ctx->gpr[3] = 0;
+}
+
+static void civrev_inet_addr(ppu_context* ctx)
+{
+    const uint32_t cp = (uint32_t)ctx->gpr[3];
+    if (!cp) { ctx->gpr[3] = 0xFFFFFFFFull; return; }
+    uint32_t parts[4] = {0, 0, 0, 0};
+    int part = 0, digits = 0;
+    for (uint32_t i = 0; i < 64; i++) {
+        const uint8_t c = vm_read8(cp + i);
+        if (c >= '0' && c <= '9') {
+            parts[part] = parts[part] * 10u + (uint32_t)(c - '0');
+            if (parts[part] > 255u) { ctx->gpr[3] = 0xFFFFFFFFull; return; }
+            digits++;
+        } else if (c == '.') {
+            if (!digits || part >= 3) { ctx->gpr[3] = 0xFFFFFFFFull; return; }
+            part++;
+            digits = 0;
+        } else if (c == 0) {
+            break;
+        } else {
+            ctx->gpr[3] = 0xFFFFFFFFull;
+            return;
+        }
+    }
+    if (part != 3 || !digits) { ctx->gpr[3] = 0xFFFFFFFFull; return; }
+    /* Big-endian guest u32 representation of a.b.c.d */
+    ctx->gpr[3] = ((uint64_t)parts[0] << 24) | ((uint64_t)parts[1] << 16) |
+                  ((uint64_t)parts[2] << 8)  | (uint64_t)parts[3];
+}
+
 namespace {
 struct CivrevHleRegistrar {
     CivrevHleRegistrar()
     {
         ps3_hle_register_ctx(0x82F294B2u, "cellOvisGetOverlayTableSize(civrev)",
                              civrev_ovis_get_overlay_table_size);
+        ps3_hle_register_ctx(0x082BFB09u, "_cellSpursQueueInitialize(civrev)",
+                             civrev_spurs_queue_init);
         ps3_hle_register_ctx(0x91066667u, "_cellSpursQueuePopBody(civrev)",
                              civrev_spurs_queue_pop_body);
+        ps3_hle_register_ctx(0x039D70B7u, "cellSpursQueueDetachLv2EventQueue(civrev)",
+                             civrev_return_ok);
+        ps3_hle_register_ctx(0x45FE2FCEu, "_sys_spu_printf_initialize(civrev)",
+                             civrev_return_ok);
+        ps3_hle_register_ctx(0xDD0C1E09u, "_sys_spu_printf_finalize(civrev)",
+                             civrev_return_ok);
+        ps3_hle_register_ctx(0x56DFE179u, "cellAudioSetPortLevel(civrev)",
+                             civrev_return_ok);
+        ps3_hle_register_ctx(0xDABBC2C0u, "inet_addr(civrev)",
+                             civrev_inet_addr);
     }
 } g_civrev_hle_registrar;
 }
