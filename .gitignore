@@ -1,0 +1,41 @@
+# Build output
+build*/
+*.map
+*.log
+*.err
+*.exe
+*.obj
+*.lib
+*.pdb
+*.ilk
+
+# Editor / tool state
+.vs/
+.vscode/
+CMakeUserPresets.json
+__pycache__/
+
+# Generated from the game by tools/relift.ps1 -- derived from copyrighted code, never commit
+analysis/
+src/recomp/
+src/gen/
+src/spu_gen/
+spu_miss/
+
+# Game files, keys, assets -- never commit
+game/
+vfs/
+*.elf
+*.ELF
+*.BIN
+*.bin
+*.self
+*.sprx
+*.sdat
+*.FPK
+*.bik
+*.iso
+
+# Debug captures
+frames/
+scratch/
