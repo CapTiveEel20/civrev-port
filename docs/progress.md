@@ -3,6 +3,23 @@
 Newest first. Each entry: what we saw (symptom) → why (cause) → what fixed it.
 Fixes in ps3recomp itself are marked **[runtime]**.
 
+## 2026-11-10: disc data in place, next blocker is PhysX/SPURS
+
+- Disc `PS3_GAME` copied to `civrev-gamefiles\vfs\` (83 files, 4.92 GB). `run.bat`
+  sets `PS3_VFS_ROOT` to it. Title id `BLES00238` read from PARAM.SFO. The `.FPK`
+  archives open and read.
+- 283 distinct paths fail to open: loose shaders (`Shaders/PS3/*.NSB`, `GBCache/`,
+  `USRDIR/*.vpo|*.fpo`). The disc's `Shaders` folders are empty, so the game probes
+  for loose files and falls back to the archives. Not a port bug.
+- One unresolved import: NID `0x45FE2FCE`.
+- Stops here: `PhysX: Error allocating memory for overlay table` → `Cannot load SPURS
+  programs` → `Cannot run without SPURS`, then `sys_prx_exitspawn_with_level` and a
+  `cellGcmSetFlipMode` loop.
+- **[runtime]** The fast-path TOC bug is fixed upstream by open PR
+  [sp00nznet/ps3recomp#760](https://github.com/sp00nznet/ps3recomp/pull/760). Its exact
+  `ppu_hle.cpp` boots Civ Rev without our stub fix: 0 null reads, 40 s, 5 FPKs open.
+  Keep `fix_import_stub_toc.py` until #760 is merged.
+
 ## 2026-11-10: first boot, past the C runtime start-up
 
 - Run: `build\civrev.exe <EBOOT.elf>`. With no argument it prints usage and exits

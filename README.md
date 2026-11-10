@@ -4,7 +4,8 @@
 with [ps3recomp](https://github.com/sp00nznet/ps3recomp). The project layout follows
 [sp00nznet/tornado](https://github.com/sp00nznet/tornado).
 
-**Status:** `civrev.exe` compiles and links (0 errors). It has not been booted yet.
+**Status:** boots through C runtime start-up, opens the D3D12 window and reads the
+disc archives, then stops at PhysX: "Cannot run without SPURS" (SPU task system).
 See [docs/progress.md](docs/progress.md) and [docs/feasibility.md](docs/feasibility.md).
 
 ## Requirements
@@ -18,7 +19,9 @@ See [docs/progress.md](docs/progress.md) and [docs/feasibility.md](docs/feasibil
 The scripts look for these folders side by side by default:
 ```
 ps3recomp\          ps3recomp checkout
-civrev-gamefiles\   EBOOT.elf (your game files; keep them outside every repo)
+civrev-gamefiles\   your game files; keep them outside every repo
+  EBOOT.elf           decrypted game program
+  vfs\PS3_GAME\       the disc's PS3_GAME folder, copied as-is (the game's "/dev_bdvd")
 civrev-port\        this repository
 ```
 Other locations: `tools\relift.ps1 -PS3Recomp <path> -Elf <path>`, and
@@ -30,10 +33,17 @@ powershell -ExecutionPolicy Bypass -File tools\relift.ps1   # generate code from
 powershell -ExecutionPolicy Bypass -File build.ps1          # compile build\civrev.exe (~5 min, 16 threads)
 ```
 
+## Run
+Double-click `run.bat`. It sets `PS3_VFS_ROOT` to `..\civrev-gamefiles\vfs`, starts
+`build\civrev.exe ..\civrev-gamefiles\EBOOT.elf` and writes the output to `run.log` and
+`run.err.log`. Started without arguments, `civrev.exe` only prints its usage and exits.
+
 ## Repository contents
 | Path | What |
 |---|---|
 | `CMakeLists.txt`, `build.ps1` | Build configuration (clang-cl + Ninja) |
+| `run.bat` | Starts the game with the folder layout above |
+| `tools/fix_import_stub_toc.py` | Post-lift fix: import stubs save r2 like the real PS3 stub (run by `relift.ps1`) |
 | `tools/relift.ps1` | Runs the ps3recomp pipeline on your EBOOT: loader, PPU lifter, HLE table, SPU lifter |
 | `tools/import_coverage.py` | Checks the game's firmware imports against ps3recomp's handlers |
 | `src/compat/` | POSIX header shims for Windows |
