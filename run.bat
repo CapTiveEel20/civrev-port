@@ -15,6 +15,9 @@ if not exist "%GAME%\vfs\PS3_GAME\PARAM.SFO" (
     pause & exit /b 1
 )
 set "PS3_VFS_ROOT=%GAME%\vfs"
+rem Use ps3recomp's live-draw renderer. The default D3D12 backend draws this game
+rem upside down (it ignores the guest's viewport Y sign) with wrong font glyphs.
+if not defined RSX_LIVE_DRAW set "RSX_LIVE_DRAW=1"
 echo Running civrev.exe - close the game window to stop. Output: run.log, run.err.log
 "%~dp0build\civrev.exe" "%GAME%\EBOOT.elf" %* > "%~dp0run.log" 2> "%~dp0run.err.log"
 echo civrev.exe exited with code %ERRORLEVEL%.

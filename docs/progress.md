@@ -3,6 +3,19 @@
 Newest first. Each entry: what we saw (symptom) → why (cause) → what fixed it.
 Fixes in ps3recomp itself are marked **[runtime]**.
 
+## 2026-11-10: first readable screen ("Caricamento...")
+
+- With the default D3D12 backend the window shows one line of text at the bottom,
+  upside down and mirrored. Flipped vertically it reads "Qa fpamNdne": the glyphs
+  are upright but they're the wrong characters. That backend's viewport epilogue
+  keeps x/y as identity (`rsx_d3d12_backend.c`, "x/y identity"), so it ignores the
+  sign of the guest's viewport Y scale. This game also picks the wrong glyphs from
+  its font atlas there.
+- With `RSX_LIVE_DRAW=1` (ps3recomp's live-draw engine, which honours
+  SET_SHADER_WINDOW) the same frame reads **"Caricamento..."** (Italian, following
+  the host language), the right way up and centred at the top. `run.bat` now sets it.
+- The game stays on that screen: PhysX/SPURS failure (see below).
+
 ## 2026-11-10: disc data in place, next blocker is PhysX/SPURS
 
 - Disc `PS3_GAME` copied to `civrev-gamefiles\vfs\` (83 files, 4.92 GB). `run.bat`
