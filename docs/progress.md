@@ -3,6 +3,17 @@
 Newest first. Each entry: what we saw (symptom) → why (cause) → what fixed it.
 Fixes in ps3recomp itself are marked **[runtime]**.
 
+## 2026-11-11: Bink videos play; no more black frames; delete-save window
+
+- Symptom 1: no videos at all (boot intro `IntroMovie.bik`, new-game `DawnOfMan.bik`). The file was opened, but the "Bink IO Thread" was never created.
+- Cause 1: the game opens each movie with `cellFsOpen` and hands the fd to Bink (`BINKFILEHANDLE`, flags `0x00800400`). Bink's reader seeks and reads with the raw lv2 syscalls (818 `sys_fs_lseek`, 802 `sys_fs_read`). ps3recomp kept two separate fd tables (cellFs HLE in `ppu_fs.cpp`, syscalls in `sys_fs.c`), so the header read got EBADF (`0x8001002A`) and `BinkOpen` (`func_00E41D28`) returned 0.
+- Fix 1 (**[runtime]**, ps3recomp `0c97f1aa` on local branch `fix/rsx-array-element`): one fd space, as on a PS3: the syscalls fall back to cellFs files, and each open path skips fd numbers the other has open. New test `tools/test_ppu_fs_syscall_bridge.py` (fails on the old code with exactly that EBADF).
+- Symptom 2: an occasional fully black screen for about a quarter of a second, when leader/advisor 3D scenes appear (e.g. after beating barbarians).
+- Cause 2: those scenes run a depth-of-field chain: the scene is copied to `0x1A00000` as A8R8G8B8 1280×720, then blurred down to 640×360 / 320×180 and recombined. The FP16 fog-of-war buffer lives at the same address and size. When the blur sampled `0x1A00000`, the live renderer took the first same-size surface in its table (the nearly black fog buffer) instead of the one just drawn, so the blur, and the whole frame, came out black. Found with a new black-frame detector (`LD_BLACK_DBG=1`) that auto-triggers the F9 capture.
+- Fix 2 (**[runtime]**, ps3recomp `d2337ffb`): among same-size surfaces at one address, sample the most recently written one (what guest memory would hold). `LD_ALIAS_FIRST=1` restores the old behaviour.
+- Fix 3 (**[runtime]**, ps3recomp `36d67c31`): the delete-save picker now uses the same layout as the load/save picker.
+- Result: user play-test: both videos play, no more black screens.
+
 ## 2026-11-11: fog of war visible; leader stays inside his frame
 
 - Symptom 1: on the leader-select screen the 3D leader was drawn over the title bar and the info panel instead of inside the gold frame.
