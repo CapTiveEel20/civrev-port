@@ -187,11 +187,18 @@ static void civrev_spurs_queue_pop_body(ppu_context* ctx)
                     vm_read32(q + 0x08), (uint32_t)vm_read64(q + 0x10), (uint32_t)ctx->lr);
         rc = spurs_queue_try_pop(q, buf, peek);
         /* Blocking: the real call sleeps on the queue's lv2 event queue until a
-         * task pushes. Poll instead; results arrive within a few ms. */
+         * task pushes. Poll instead. For the first millisecond only yield the
+         * CPU between polls: Windows can't sleep less than ~1 ms, so the old
+         * sleep_for(200 us) cost at least 1 ms per wait even when the PhysX
+         * task finished microseconds later (measured: 12% of the main thread
+         * in a match). After that, sleep as before. */
         const auto t0 = std::chrono::steady_clock::now();
         int beats = 0;
         while (blocking && rc == SPURS_TASK_ERROR_AGAIN) {
-            std::this_thread::sleep_for(std::chrono::microseconds(200));
+            if (std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds(1))
+                std::this_thread::yield();
+            else
+                std::this_thread::sleep_for(std::chrono::microseconds(200));
             rc = spurs_queue_try_pop(q, buf, peek);
             const auto secs = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - t0).count();
             if (beats < 4 && secs >= 2 * (beats + 1)) {
