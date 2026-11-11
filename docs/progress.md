@@ -3,6 +3,13 @@
 Newest first. Each entry: what we saw (symptom) → why (cause) → what fixed it.
 Fixes in ps3recomp itself are marked **[runtime]**.
 
+## 2026-11-11: 3D characters lit correctly (blotchy skin, black trees)
+
+- Symptom: advisor/leader skin covered in hard-edged red-brown patches, speckled clothes, near-black trees.
+- Cause: the character material lights models from five cube maps (one diffuse, four reflection levels). RSX stores each cube face as a complete mip chain padded to 128 bytes; the live D3D12 renderer assumed face = total size / 6 (no padding, and a shorter mip count for DXT), so faces 1–5 were read from the wrong offsets (e.g. 174,760 instead of 174,848 bytes per face).
+- Fix (**[runtime]**, ps3recomp `bb452b9b` on local branch `fix/rsx-array-element`): `rsx_live_draw.c` uses `rsx_texture_cube_face_stride` (already used by `rsx_draw_engine.c`); `LD_CUBE_OLD_STRIDE=1` restores the old behaviour. Also wired texture gamma / normal-map expansion and sRGB colour export into the live renderer (the game only uses the sRGB export).
+- Result: smooth skin and green trees in a scripted match (44–53 FPS) and in the user's own play-test.
+
 ## 2026-11-10: first match running ("Gioca ora" → 3D world map)
 
 - Symptom: right after the match loading screen, the game crashed (null reads in `func_00A60D20`), always just after `unresolved NID 0xA121A224` and `0x13AE18F3`.
