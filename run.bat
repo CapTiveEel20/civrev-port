@@ -38,7 +38,21 @@ set "PS3_VFS_ROOT=%GAME%\vfs"
 rem Use ps3recomp's live-draw renderer. The default D3D12 backend draws this game
 rem upside down (it ignores the guest's viewport Y sign) with wrong font glyphs.
 if not defined RSX_LIVE_DRAW set "RSX_LIVE_DRAW=1"
+rem Per-frame log lines are slow here: run.log is unbuffered, ~150 us a line
+rem (measured), and the game wrote ~40 lines a frame. Set PS3_VERBOSE=1 for them.
+if not defined PS3_VERBOSE set "PS3_VERBOSE=0"
+rem Keep the logs of the last 10 runs in logs\ so a crash report survives the
+rem next launch (newest run is always run.log / run.err.log).
+set "HERE=%~dp0"
+powershell -NoProfile -Command "$h=$env:HERE; $e=Join-Path $h 'run.err.log'; if (Test-Path -LiteralPath $e) { $d=Join-Path $h 'logs'; New-Item -ItemType Directory -Force -Path $d | Out-Null; $t=(Get-Item -LiteralPath $e).LastWriteTime.ToString('yyyy-MM-dd_HH-mm-ss'); Move-Item -LiteralPath $e -Destination (Join-Path $d ('run_'+$t+'.err.log')) -Force; $o=Join-Path $h 'run.log'; if (Test-Path -LiteralPath $o) { Move-Item -LiteralPath $o -Destination (Join-Path $d ('run_'+$t+'.log')) -Force }; Get-ChildItem -LiteralPath $d -Filter 'run_*.err.log' | Sort-Object Name -Descending | Select-Object -Skip 10 | ForEach-Object { Remove-Item -LiteralPath $_.FullName; $l=$_.FullName -replace '[.]err[.]log$','.log'; if (Test-Path -LiteralPath $l) { Remove-Item -LiteralPath $l } } }"
 echo Running civrev.exe - close the game window to stop. Output: run.log, run.err.log
 "%~dp0build\civrev.exe" "%GAME%\EBOOT.elf" %* > "%~dp0run.log" 2> "%~dp0run.err.log"
-echo civrev.exe exited with code %ERRORLEVEL%.
+set "RC=%ERRORLEVEL%"
+echo civrev.exe exited with code %RC%.
+if not "%RC%"=="0" (
+    echo.
+    echo The game did not close normally - it probably crashed. Crash report:
+    findstr /B /L /C:"[CRASH]" /C:"[ABORT]" /C:"[STACKOVERFLOW]" "%~dp0run.err.log"
+    echo Please send run.err.log ^(next launch moves it into the logs folder^).
+)
 pause

@@ -3,6 +3,14 @@
 Newest first. Each entry: what we saw (symptom) → why (cause) → what fixed it.
 Fixes in ps3recomp itself are marked **[runtime]**.
 
+## 2026-11-11: no more in-game freezes; crash logs kept
+
+- Symptom: the game froze at random during a match, more often in busy scenes. Earlier runs also lost their logs, because each launch overwrote `run.err.log`.
+- Cause: the game streams its GPU commands through a 2 MB ring, and in busy scenes a single frame is almost 2 MB. When a frame ended near the end of the ring, ps3recomp sent the game back to the start without waiting for the renderer, so the game could lap it and overwrite commands it had not read yet. The renderer then read vertex data as a JUMP, lost that frame's flip, and the game waited for it forever in its frame pacer. Proven with a new `[FIFOWHY]` report: the words the renderer had just read were overwritten a moment later.
+- Fix (**[runtime]**, ps3recomp `b01b9b66` on local branch `fix/rsx-array-element`): that wrap now waits for the renderer, as the normal buffer-full path does, and only after the flip request is recorded (doing it before caused a different freeze). `GCM_FLIP_WRAP_NOWAIT=1` restores the old behaviour.
+- `run.bat`: keeps the logs of the last 10 runs in `logs\`, prints the crash lines when the game exits abnormally, and sets `PS3_VERBOSE=0`, which silences the per-frame log lines (ps3recomp `0d825a9b` moved the per-task SPURS lines behind that switch). That made the logs small but didn't change the FPS.
+- Result: user play-test: no more freezes. FPS is still 30-40 in a match (next).
+
 ## 2026-11-11: Bink videos play; no more black frames; delete-save window
 
 - Symptom 1: no videos at all (boot intro `IntroMovie.bik`, new-game `DawnOfMan.bik`). The file was opened, but the "Bink IO Thread" was never created.
