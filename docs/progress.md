@@ -3,6 +3,16 @@
 Newest first. Each entry: what we saw (symptom) → why (cause) → what fixed it.
 Fixes in ps3recomp itself are marked **[runtime]**.
 
+## 2026-11-11: fog of war visible; leader stays inside his frame
+
+- Symptom 1: on the leader-select screen the 3D leader was drawn over the title bar and the info panel instead of inside the gold frame.
+- Cause 1: the leader's projection is built for a 1280×351 viewport window. Real RSX clips every draw to that window (viewport centre ± scale); the live D3D12 renderer only used the viewport as a transform over the whole surface, so nothing outside it was clipped.
+- Fix 1 (**[runtime]**, ps3recomp `f24da99d` on local branch `fix/rsx-array-element`): `rsx_live_draw.c` clips each draw to scissor ∩ viewport window. `LD_VP_CLIP=0` restores the old behaviour.
+- Symptom 2: no fog of war at all; after a first fix, a flat haze on the lower part of the screen with a hard edge.
+- Cause 2: the fog pass reads the depth buffer as an A8R8G8B8 colour texture with a channel remap, at the pixel's window position. The live renderer (a) gave it guest RAM instead of the host depth buffer, (b) ignored the remap, and (c) did not flip the window position for the game's bottom-left window origin (`0x1D88`), so it read a mirrored depth.
+- Fix 2 (**[runtime]**, same commit): depth → ARGB compute copy honouring the remap (`LD_ZETA_ARGB=0` off); window height/origin passed to the pixel shaders (`LD_WPOS_WINDOW=0` off). Also added an F9 frame-capture tool (draw list, per-pass images, shaders, registers) used to find both causes.
+- Result: user play-test: fog of war shows correctly and the leader is drawn inside his frame.
+
 ## 2026-11-11: 3D characters lit correctly (blotchy skin, black trees)
 
 - Symptom: advisor/leader skin covered in hard-edged red-brown patches, speckled clothes, near-black trees.
