@@ -21,6 +21,8 @@ param(
     [string]$Eboot,                                 # decrypted EBOOT.elf
     [ValidateSet("", "yes", "no")][string]$Shortcut = "",
     [ValidateSet("", "yes", "no")][string]$Cleanup = "",
+    [ValidateSet("", "yes", "no")][string]$InstallTools = "",  # install missing VS Build Tools / Python with winget
+    [switch]$ShowAll,                               # print every tool line on screen (it always goes to setup.log)
     [switch]$NoPause
 )
 $ErrorActionPreference = "Stop"
@@ -51,23 +53,61 @@ function Fail([string]$Step, [string]$Msg) {
     Log "" ; Log "SETUP STOPPED in step: $Step" Red
     Log $Msg Yellow
     Write-Host ""
-    Write-Host "---- last lines of setup.log ----" -ForegroundColor DarkGray
-    Get-Content -LiteralPath $Log -Tail 30 | ForEach-Object { Write-Host $_ -ForegroundColor DarkGray }
+    if (-not $script:FailDetailsShown) {
+        Write-Host "---- last lines of setup.log ----" -ForegroundColor DarkGray
+        Get-Content -LiteralPath $Log -Tail 30 | ForEach-Object { Write-Host $_ -ForegroundColor DarkGray }
+    }
     Write-Host "Full log: $Log" -ForegroundColor DarkGray
     Write-Host "Fix the problem above, then run Setup.bat again: finished steps are skipped."
     Wait-Key
     exit 1
 }
 
-# Run a program; its output goes to the console and setup.log. Throws on a non-zero exit.
+# Run a program. Every line it prints goes to setup.log. The screen shows only
+# a progress line (compile: "N of M files (P%)", else seconds elapsed) and the
+# kit scripts' own "==>" step names: compilers print thousands of harmless
+# warnings that would only alarm players. -ShowAll prints everything.
+# Throws on a non-zero exit; the message carries the tool's error lines.
 function Invoke-Logged([string]$What, [string]$Exe, [string[]]$Arguments) {
     $ErrorActionPreference = "Continue"     # stderr lines are normal output here
-    & $Exe @Arguments 2>&1 | ForEach-Object {
-        $line = "$_"
-        Write-Host $line
-        Add-Content -LiteralPath $Log -Value $line
+    $errs = New-Object Collections.Generic.List[string]
+    $tail = New-Object Collections.Generic.Queue[string]
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $ui = @{ Open = $false; Next = 0.0; Ninja = $false }
+    $writer = New-Object IO.StreamWriter($Log, $true)
+    try {
+        & $Exe @Arguments 2>&1 | ForEach-Object {
+            $line = "$_"
+            $writer.WriteLine($line)
+            if ($ShowAll) { Write-Host $line; return }
+            $kind = Get-OutputLineKind $line
+            if ($kind -eq "error") { $errs.Add($line) }
+            $tail.Enqueue($line); if ($tail.Count -gt 15) { [void]$tail.Dequeue() }
+            $text = $null
+            if ($kind -eq "status") {
+                if ($ui.Open) { Write-Host ""; $ui.Open = $false }
+                Write-Host ("   " + $line.Substring(4))
+                $ui.Next = 0.0
+            } elseif ($kind -eq "progress") {
+                $p = Get-NinjaProgress $line; $ui.Ninja = $true
+                $text = "{0}: {1} of {2} files ({3}%)" -f $What, $p[0], $p[1], [int][Math]::Floor(100 * $p[0] / $p[1])
+            } elseif (-not $ui.Ninja -and $clock.Elapsed.TotalSeconds -ge $ui.Next) {
+                $text = "{0}... {1:N0} s" -f $What, $clock.Elapsed.TotalSeconds
+                $ui.Next = $clock.Elapsed.TotalSeconds + 1
+            }
+            if ($text) { Write-Host -NoNewline ("`r   " + $text).PadRight(78); $ui.Open = $true }
+        }
+        $code = $LASTEXITCODE
+    } finally {
+        $writer.Dispose()
     }
-    if ($LASTEXITCODE -ne 0) { throw "$What failed (exit code $LASTEXITCODE). See the lines above." }
+    if ($ui.Open) { Write-Host "" }
+    if ($code -ne 0) {
+        $shown = @($tail)
+        if ($errs.Count) { $shown = @($errs | Select-Object -First 12) }
+        $script:FailDetailsShown = $true
+        throw ("$What failed (exit code $code). What went wrong:`n    " + ($shown -join "`n    "))
+    }
 }
 
 function Invoke-Script([string]$What, [string]$Script, [string[]]$Arguments = @()) {
@@ -77,6 +117,7 @@ function Invoke-Script([string]$What, [string]$Script, [string[]]$Arguments = @(
 function Invoke-Step([string]$Name, [string]$Marker, [scriptblock]$Body) {
     if ($Marker -and (Test-StepDone $KitRoot $Marker)) { Log "== $Name : already done, skipped" DarkGray; return }
     Log "" ; Log "== $Name" Cyan
+    $script:FailDetailsShown = $false
     $t = [Diagnostics.Stopwatch]::StartNew()
     try { & $Body } catch { Fail $Name $_.Exception.Message }
     if ($Marker) { Set-StepDone $KitRoot $Marker }
@@ -110,9 +151,49 @@ function Pick-Folder([string]$Title) {
 }
 
 # ----------------------------------------------------------------- steps ----
+$InstallToolsText = @"
+
+Setup needs two free programs that are not on this PC yet:
+{0}
+Setup can install them for you now with winget, the app installer built into
+Windows. They come straight from Microsoft and python.org.
+  - Up to about 5 GB to download; 10 to 30 minutes.
+  - Windows asks once "Do you want to allow this app to make changes to your
+    device?": answer Yes. An installer window shows its progress.
+"@
+
+# Offer to install missing Visual Studio Build Tools / Python with winget.
+function Install-MissingTools([bool]$NeedVs, [bool]$NeedPython) {
+    $plan = @(Get-ToolInstallPlan $NeedVs $NeedPython)
+    if ($InstallTools -eq "no" -or $plan.Count -eq 0) { return }
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Log "   winget (Windows' app installer) is not available here, so the tools must be installed by hand." Yellow
+        return
+    }
+    if ($InstallTools -ne "yes") {
+        Write-Host ($InstallToolsText -f (($plan | ForEach-Object { "  - " + $_.What }) -join "`n"))
+        if (-not (Ask-YesNo "Install them now?" $true)) { return }
+    }
+    foreach ($p in $plan) {
+        Log "   Installing $($p.What)..."
+        try { Invoke-Logged "Installing $($p.What)" "winget" $p.Args }
+        catch { Log "   $($_.Exception.Message)" Yellow }     # checked again below
+    }
+    # The installers changed PATH for new windows; give this one the new PATH too.
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+    $script:FailDetailsShown = $false
+}
+
 function Test-Tools {
     $missing = @()
     if (-not [Environment]::Is64BitOperatingSystem) { $missing += "A 64-bit Windows 10 or 11." }
+    if (-not (Test-StepDone $KitRoot "compile")) {
+        $free = Get-FreeGB $KitRoot
+        if ($free -lt $MinFreeGB) { $missing += "At least $MinFreeGB GB free on this drive (now $free GB)." }
+    }
+    $needVs = -not (Get-VsInstallPath)
+    $needPy = -not (Find-Python)
+    if (($needVs -or $needPy) -and -not $missing.Count) { Install-MissingTools $needVs $needPy }
     if (-not (Get-VsInstallPath)) {
         $missing += "Visual Studio 2022 (Community is free) with these parts ticked in the Visual Studio Installer:`n" +
                     "      - Workload 'Desktop development with C++'`n" +
@@ -123,10 +204,6 @@ function Test-Tools {
     $script:Python = Find-Python
     if (-not $script:Python) {
         $missing += "Python 3.10 or newer from https://www.python.org/downloads/ (tick 'Add python.exe to PATH' in the installer)."
-    }
-    if (-not (Test-StepDone $KitRoot "compile")) {
-        $free = Get-FreeGB $KitRoot
-        if ($free -lt $MinFreeGB) { $missing += "At least $MinFreeGB GB free on this drive (now $free GB)." }
     }
     if ($missing.Count) { throw ("Missing:`n  - " + ($missing -join "`n  - ") + "`nInstall them, then run Setup.bat again.") }
     Log "   Visual Studio: $(Get-VsInstallPath)"

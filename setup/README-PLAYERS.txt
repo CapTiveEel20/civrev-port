@@ -16,20 +16,22 @@ WHAT YOU NEED
    PS3_GAME\USRDIR\EBOOT.BIN. RPCS3 writes EBOOT.elf next to it.
    (Setup refuses the still-encrypted EBOOT.BIN and other game versions.)
 
-3. Visual Studio 2022 (the free Community edition is fine):
-   https://visualstudio.microsoft.com/downloads/
-   In the Visual Studio Installer tick:
-     - Workload "Desktop development with C++"
-     - Individual component "C++ Clang Compiler for Windows"
-     - Individual component "C++ CMake tools for Windows"
+3. Two free programs that build the game: Visual Studio 2022 Build Tools
+   (Microsoft's C++ compiler) and Python. You do not need to get them
+   yourself: if they are missing, Setup offers to install them for you
+   (answer Y). That downloads up to about 5 GB, takes 10 to 30 minutes, and
+   Windows asks once "Do you want to allow this app to make changes to your
+   device?": answer Yes.
+   (To install them by hand instead: Visual Studio 2022 from
+   https://visualstudio.microsoft.com/downloads/ with the workload "Desktop
+   development with C++" and the components "C++ Clang Compiler for Windows"
+   and "C++ CMake tools for Windows"; Python 3.10 or newer from
+   https://www.python.org/downloads/ with "Add python.exe to PATH" ticked.)
 
-4. Python 3.10 or newer: https://www.python.org/downloads/
-   Tick "Add python.exe to PATH" in the installer.
+4. About 10 GB of free disk space where you extract this kit (plus about
+   8 GB on C: if Setup installs the tools), and an internet connection.
 
-5. About 10 GB of free disk space where you extract this kit, and an
-   internet connection (Setup downloads the ps3recomp runtime once).
-
-6. Windows 10 or 11, 64-bit.
+5. Windows 10 or 11, 64-bit.
 
 
 INSTALL
@@ -38,6 +40,10 @@ INSTALL
 2. Double-click Setup.bat. It asks for your .iso (or disc folder) and your
    EBOOT.elf, then copies the disc, generates and compiles the game.
    On a fast PC this takes about 10 minutes; slower PCs take longer.
+   While it works you see one progress line per step, for example
+   "Compiling: 120 of 450 files (26%)". Leave the window open until it says
+   DONE. (setup.log gets everything the compilers print, including thousands
+   of "warning" lines: those are normal and harmless.)
 3. At the end it offers a desktop shortcut and asks whether to delete the
    build leftovers (about 1.1 GB; the game works either way).
 

@@ -41,10 +41,19 @@ function Test-EbootFile([string]$Path, [string]$Sha256) {
 }
 
 # Full path of a Python >= 3.10, or $null. The Microsoft Store "python" alias
-# (prints nothing useful) and failing commands count as missing.
-function Find-Python([string[][]]$Candidates = @(@('py', '-3'), @('python'))) {
+# (prints nothing useful) and failing commands count as missing. Commands on
+# PATH first, then the usual install folders (a Python installed a moment ago
+# by Setup may not be on this window's PATH yet).
+function Find-Python([string[][]]$Candidates = @(@('py', '-3'), @('python')),
+                     [string[]]$Globs = @("$env:LOCALAPPDATA\Programs\Python\Python3*\python.exe",
+                                          "$env:ProgramFiles\Python3*\python.exe")) {
     $ErrorActionPreference = "Continue"
     $code = "import sys;print(sys.executable) if sys.version_info>=(3,10) else None"
+    foreach ($g in $Globs) {
+        foreach ($f in @(Get-ChildItem -Path $g -File -ErrorAction SilentlyContinue | Sort-Object FullName -Descending)) {
+            $Candidates += , @($f.FullName)
+        }
+    }
     foreach ($c in $Candidates) {
         $rest = @(); if ($c.Count -gt 1) { $rest = $c[1..($c.Count - 1)] }
         try { $out = & $c[0] @rest -c $code 2>$null } catch { continue }
@@ -56,6 +65,45 @@ function Find-Python([string[][]]$Candidates = @(@('py', '-3'), @('python'))) {
 }
 
 $script:VsComponents = @("Microsoft.VisualStudio.Component.VC.Llvm.Clang", "Microsoft.VisualStudio.Component.VC.CMake.Project")
+
+# winget installs for the missing tools, as @{ What = name; Args = winget arguments }.
+# Python: per-user, added to PATH. Visual Studio Build Tools: the C++ workload
+# plus every component Get-VsInstallPath requires; --wait so winget returns
+# only when the installer has finished, --passive = progress window, no clicks.
+function Get-ToolInstallPlan([bool]$NeedVs, [bool]$NeedPython) {
+    $base = @("install", "--exact", "--source", "winget", "--accept-package-agreements",
+              "--accept-source-agreements", "--disable-interactivity")
+    $plan = @()
+    if ($NeedPython) {
+        $plan += @{ What = "Python 3.12"; Args = $base + @("--id", "Python.Python.3.12", "--override",
+            "/passive InstallAllUsers=0 InstallLauncherAllUsers=0 PrependPath=1 Include_launcher=1") }
+    }
+    if ($NeedVs) {
+        $vsAdd = (@("Microsoft.VisualStudio.Workload.VCTools") + $script:VsComponents | ForEach-Object { "--add $_" }) -join " "
+        $plan += @{ What = "Visual Studio 2022 Build Tools (C++ compiler, Clang, CMake)"; Args = $base + @(
+            "--id", "Microsoft.VisualStudio.2022.BuildTools", "--override",
+            "--wait --passive --norestart $vsAdd --includeRecommended") }
+    }
+    return $plan
+}
+
+# How Setup's screen treats one line printed by a tool (every line always goes to setup.log):
+#   progress  ninja's "[n/total] Building ..." line, shown as one updating percentage
+#   status    a kit script's own "==> step" line, shown
+#   error     a real failure, shown only if the tool fails
+#   log       everything else, e.g. thousands of harmless compiler warnings: setup.log only
+function Get-OutputLineKind([string]$Line) {
+    if ($Line -cmatch '^\[\d+/\d+\] ') { return "progress" }
+    if ($Line -cmatch '^==> ') { return "status" }
+    if ($Line -cmatch '\berror( [A-Z]+\d+)?:|^FAILED: |^ninja: build stopped|^CMake Error|^ERROR: |^Traceback |^\w+(Error|Exception): ') { return "error" }
+    return "log"
+}
+
+# "[59/161] Building ..." -> @(59, 161); any other line -> $null.
+function Get-NinjaProgress([string]$Line) {
+    if ($Line -cmatch '^\[(\d+)/(\d+)\] ') { return @([int]$matches[1], [int]$matches[2]) }
+    return $null
+}
 
 # Install folder of a Visual Studio with C++ Clang + CMake tools, or $null.
 function Get-VsInstallPath {

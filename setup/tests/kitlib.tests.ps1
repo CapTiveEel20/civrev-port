@@ -61,12 +61,61 @@ try {
     Assert ((Test-EbootFile "$tmp\elf.elf" $own) -eq "ok") "Test-EbootFile matching hash -> ok"
 
     # ---- Find-Python ----
-    Assert ($null -eq (Find-Python @(, @('no-such-python-xyz')))) "Find-Python unknown command -> null"
+    Assert ($null -eq (Find-Python @(, @('no-such-python-xyz')) @())) "Find-Python unknown command -> null"
     # where.exe fails (exit 2) without interpreting the appended code; 'cmd /c' would treat
     # '>=(3,10)' as a redirection and create a stray file named '(3'.
-    Assert ($null -eq (Find-Python @(, @('where.exe', 'no-such-python-xyz')))) "Find-Python failing command -> null"
+    Assert ($null -eq (Find-Python @(, @('where.exe', 'no-such-python-xyz')) @())) "Find-Python failing command -> null"
     $py = Find-Python
     Assert ($py -and (Test-Path $py)) "Find-Python default finds an interpreter ($py)"
+    # Not on PATH (fresh winget install before a new window): found in the usual install folders.
+    $glob = $py -replace 'python\.exe$', 'pytho?.exe'
+    $found = Find-Python @(, @('no-such-python-xyz')) @("$tmp\nothing\python.exe", $glob)
+    Assert ($found -eq $py) "Find-Python falls back to install-folder globs ($found)"
+    Assert ($null -eq (Find-Python @(, @('no-such-python-xyz')) @("$tmp\nothing\python.exe"))) "Find-Python no candidate, no glob match -> null"
+
+    # ---- Get-OutputLineKind / Get-NinjaProgress (what Setup shows on screen) ----
+    $kinds = [ordered]@{
+        '[59/161] Building C object CMakeFiles\ps3recomp_runtime.dir\libs\audio\cellAudio.c.obj' = "progress"
+        '==> 3/5 lift PPU code to C++' = "status"
+        'C:\x\ppu_memory.h(310,38): warning: implicit conversion loses integer precision [-Wimplicit-int-conversion]' = "log"
+        'C:\x\include\psemu/error_codes.h(12,9): note: expanded from macro ''CELL_EFAULT''' = "log"
+        'C:\x\cellKb.h(40,5): note: expanded from macro ''CELL_KB_ERROR_INVALID_PARAMETER''' = "log"
+        '        return CELL_KB_ERROR_INVALID_PARAMETER;' = "log"
+        'Requirement already satisfied: pyelftools in c:\x\.venv\lib\site-packages' = "log"
+        'C:\x\a.c(3,1): error: use of undeclared identifier ''foo''' = "error"
+        'clang-cl: error: unknown argument: ''-mfoo''' = "error"
+        'LINK : fatal error LNK1104: cannot open file ''x.lib''' = "error"
+        'C:\x\a.cpp(1): fatal error C1083: Cannot open include file' = "error"
+        'FAILED: CMakeFiles/civrev.dir/src/recomp/ppu_recomp_001.cpp.obj' = "error"
+        'ninja: build stopped: subcommand failed.' = "error"
+        'CMake Error at CMakeLists.txt:12 (project):' = "error"
+        'ERROR: Could not find a version that satisfies the requirement foo' = "error"
+        'Traceback (most recent call last):' = "error"
+        'ModuleNotFoundError: No module named ''elftools''' = "error"
+    }
+    foreach ($l in $kinds.Keys) {
+        $k = Get-OutputLineKind $l
+        Assert ($k -eq $kinds[$l]) "Get-OutputLineKind '$($l.Substring(0, [Math]::Min(50, $l.Length)))' -> $($kinds[$l]) (got $k)"
+    }
+    $p = Get-NinjaProgress '[59/161] Building C object x.obj'
+    Assert ($p[0] -eq 59 -and $p[1] -eq 161) "Get-NinjaProgress [59/161] -> 59, 161"
+    Assert ($null -eq (Get-NinjaProgress 'warning: [59/161]')) "Get-NinjaProgress other line -> null"
+
+    # ---- Get-ToolInstallPlan (winget command lines) ----
+    Assert (@(Get-ToolInstallPlan $false $false).Count -eq 0) "Get-ToolInstallPlan nothing missing -> empty"
+    $plan = @(Get-ToolInstallPlan $true $true)
+    Assert ($plan.Count -eq 2) "Get-ToolInstallPlan both missing -> 2 installs"
+    $pyArgs = $plan[0].Args -join " "
+    Assert ($pyArgs -match '--id Python\.Python\.3\.12' -and $pyArgs -match 'PrependPath=1' -and $pyArgs -match 'InstallAllUsers=0') "Get-ToolInstallPlan Python: id, PATH, per-user"
+    $vsArgs = $plan[1].Args
+    $ov = $vsArgs[[Array]::IndexOf($vsArgs, "--override") + 1]
+    Assert (($vsArgs -join " ") -match '--id Microsoft\.VisualStudio\.2022\.BuildTools') "Get-ToolInstallPlan VS: Build Tools id"
+    $hasAll = $true
+    foreach ($c in @("Microsoft.VisualStudio.Workload.VCTools") + $script:VsComponents) { if ($ov -notmatch [regex]::Escape("--add $c")) { $hasAll = $false } }
+    Assert ($hasAll -and $ov -match '--wait') "Get-ToolInstallPlan VS override adds C++ workload + every component Setup checks for, waits"
+    foreach ($e in $plan) { Assert (($e.Args -join " ") -match '--accept-package-agreements' -and $e.Args[0] -eq "install") "Get-ToolInstallPlan '$($e.What)' is a non-interactive install" }
+    $only = @(Get-ToolInstallPlan $true $false)
+    Assert ($only.Count -eq 1 -and ($only[0].Args -join " ") -match 'BuildTools') "Get-ToolInstallPlan only VS missing -> only VS"
 
     # ---- Read-LockSha ----
     $sha = "91a6318277151cd8bf541f36ecfd5baedf4ac540"
