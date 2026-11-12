@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -137,6 +138,69 @@ static void civrev_spurs_queue_init(ppu_context* ctx)
     ctx->gpr[3] = 0;
 }
 
+/* ---- blocking queue pop: wake on SPU push (S2.47) ------------------------
+ * The SPU pushes with GETLLAR/PUTLLC on the queue's 128-byte line; the runtime
+ * calls g_spu_line_commit_hook(line) after every committed line. cellSpurs.c
+ * owns that hook, so ours chains to whatever was installed before. */
+extern "C" { extern void (*g_spu_line_commit_hook)(uint32_t line); }
+#ifdef _WIN32
+extern "C" {
+__declspec(dllimport) int  __stdcall WaitOnAddress(volatile void* addr, void* cmp, size_t size, unsigned long ms);
+__declspec(dllimport) void __stdcall WakeByAddressAll(void* addr);
+}
+#pragma comment(lib, "synchronization.lib")
+#endif
+static std::atomic<int> g_queue_waiters{0};
+static std::atomic<void (*)(uint32_t)> g_queue_prev_hook{nullptr};
+static void queue_commit_hook(uint32_t line)
+{
+    if (void (*prev)(uint32_t) = g_queue_prev_hook.load()) prev(line);
+#ifdef _WIN32
+    if (g_queue_waiters.load()) WakeByAddressAll(vm_base + line);
+#endif
+}
+static void queue_hook_install(void)
+{
+    void (*cur)(uint32_t) = g_spu_line_commit_hook;
+    if (cur == queue_commit_hook) return;
+    g_queue_prev_hook.store(cur);          /* cellSpurs.c may (re)install its own later */
+    g_spu_line_commit_hook = queue_commit_hook;
+}
+static bool queue_wake_enabled(void)
+{
+#ifdef _WIN32
+    static int s = -1;
+    if (s < 0) { const char* e = getenv("SPURS_QUEUE_WAKE"); s = (e && e[0] == '0') ? 0 : 1; }
+    return s == 1;
+#else
+    return false;
+#endif
+}
+static void queue_wait_on(void* addr, void* cmp8, unsigned ms)
+{
+#ifdef _WIN32
+    WaitOnAddress(addr, cmp8, 8, ms);
+#else
+    (void)addr; (void)cmp8; (void)ms; std::this_thread::yield();
+#endif
+}
+/* One stderr line every ~5 s: how long blocking pops waited. */
+static void queue_wait_stats(long long us, bool wake)
+{
+    static std::atomic<long long> s_n{0}, s_sum{0}, s_max{0};
+    static std::atomic<long long> s_last{0};
+    s_n++; s_sum += us;
+    long long m = s_max.load(); while (us > m && !s_max.compare_exchange_weak(m, us)) {}
+    const long long now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    long long last = s_last.load();
+    if (last == 0) { s_last.compare_exchange_strong(last, now); return; }
+    if (now - last < 5000 || !s_last.compare_exchange_strong(last, now)) return;
+    const long long n = s_n.exchange(0), sum = s_sum.exchange(0), mx = s_max.exchange(0);
+    if (n) fprintf(stderr, "[civrev] queue pop waits: %lld/s, avg %lld us, max %lld us (%s)\n",
+                   n * 1000 / (now - last), sum / n, mx, wake ? "wake" : "poll");
+}
+
 static uint32_t spurs_queue_try_pop(uint32_t q, uint32_t buf, int peek)
 {
     static std::atomic<int> s_logged{0};
@@ -187,18 +251,31 @@ static void civrev_spurs_queue_pop_body(ppu_context* ctx)
                     vm_read32(q + 0x08), (uint32_t)vm_read64(q + 0x10), (uint32_t)ctx->lr);
         rc = spurs_queue_try_pop(q, buf, peek);
         /* Blocking: the real call sleeps on the queue's lv2 event queue until a
-         * task pushes. Poll instead. For the first millisecond only yield the
-         * CPU between polls: Windows can't sleep less than ~1 ms, so the old
-         * sleep_for(200 us) cost at least 1 ms per wait even when the PhysX
-         * task finished microseconds later (measured: 12% of the main thread
-         * in a match). After that, sleep as before. */
+         * task pushes. Here: spin briefly, then sleep on the queue's two index
+         * words (WaitOnAddress); the SPU-side line commit wakes us at once
+         * (queue_commit_hook). SPURS_QUEUE_WAKE=0 = old yield/sleep polling,
+         * which overslept by up to ~1 ms per wait (Windows sleep granularity). */
         const auto t0 = std::chrono::steady_clock::now();
         int beats = 0;
+        const bool wake = blocking && rc == SPURS_TASK_ERROR_AGAIN && queue_wake_enabled();
+        if (wake) g_queue_waiters.fetch_add(1);
         while (blocking && rc == SPURS_TASK_ERROR_AGAIN) {
-            if (std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds(1))
-                std::this_thread::yield();
-            else
-                std::this_thread::sleep_for(std::chrono::microseconds(200));
+            const auto waited = std::chrono::steady_clock::now() - t0;
+            if (wake) {
+                /* Snapshot BEFORE the re-poll: a push after the snapshot changes
+                 * the words, so the wait below returns immediately. */
+                queue_hook_install();   /* every round: cellSpurs.c may have re-installed its own */
+                uint64_t snap; memcpy(&snap, vm_base + q, 8);
+                rc = spurs_queue_try_pop(q, buf, peek);
+                if (rc != SPURS_TASK_ERROR_AGAIN) break;
+                if (waited < std::chrono::microseconds(100)) std::this_thread::yield();
+                else queue_wait_on(vm_base + q, &snap, 2);
+            } else {
+                if (waited < std::chrono::milliseconds(1))
+                    std::this_thread::yield();
+                else
+                    std::this_thread::sleep_for(std::chrono::microseconds(200));
+            }
             rc = spurs_queue_try_pop(q, buf, peek);
             const auto secs = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - t0).count();
             if (beats < 4 && secs >= 2 * (beats + 1)) {
@@ -209,6 +286,10 @@ static void civrev_spurs_queue_pop_body(ppu_context* ctx)
                 fflush(stderr);
             }
         }
+        if (wake) g_queue_waiters.fetch_sub(1);
+        if (blocking && beats == 0 && std::chrono::steady_clock::now() != t0)
+            queue_wait_stats(std::chrono::duration_cast<std::chrono::microseconds>(
+                                 std::chrono::steady_clock::now() - t0).count(), wake);
     }
     ctx->gpr[3] = (uint64_t)(int64_t)(int32_t)rc;
 }
