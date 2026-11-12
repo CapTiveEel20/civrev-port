@@ -41,3 +41,12 @@ gamedata/
 # Debug captures
 frames/
 scratch/
+
+# Launcher: generated icon (game art), player settings and playtime
+launcher/build/
+CivRev.ini
+playtime.txt
+playtime.txt.tmp
+
+# Build-kit zips (tools/make_kit.ps1)
+dist/
