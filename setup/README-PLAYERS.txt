@@ -37,7 +37,7 @@ INSTALL
 1. Extract this whole zip to a folder you like (e.g. C:\Games\CivRevPC).
 2. Double-click Setup.bat. It asks for your .iso (or disc folder) and your
    EBOOT.elf, then copies the disc, generates and compiles the game.
-   On a fast PC this takes about 15 minutes; slower PCs take longer.
+   On a fast PC this takes about 10 minutes; slower PCs take longer.
 3. At the end it offers a desktop shortcut and asks whether to delete the
    build leftovers (about 1.1 GB; the game works either way).
 
