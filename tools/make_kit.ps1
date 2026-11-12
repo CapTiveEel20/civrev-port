@@ -53,8 +53,17 @@ try {
     New-Item -ItemType Directory -Force -Path (Join-Path $root "dist") | Out-Null
     $zip = Join-Path $root "dist\CivRevPC-$Version.zip"
     Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [IO.Compression.ZipFile]::CreateFromDirectory($kit, $zip, [IO.Compression.CompressionLevel]::Optimal, $true)
+    # Entry by entry with '/' separators (ZipFile.CreateFromDirectory on Windows
+    # PowerShell 5.1 writes '\', which non-Windows unzip tools mis-read).
+    Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+    $za = [IO.Compression.ZipFile]::Open($zip, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($f in Get-ChildItem -LiteralPath $kit -Recurse -File) {
+            $name = "CivRevPC/" + $f.FullName.Substring($kit.Length + 1).Replace("\", "/")
+            [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($za, $f.FullName, $name,
+                [IO.Compression.CompressionLevel]::Optimal) | Out-Null
+        }
+    } finally { $za.Dispose() }
 } finally {
     Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
 }
