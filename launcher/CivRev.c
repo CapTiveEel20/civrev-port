@@ -8,7 +8,8 @@
  *   - sets PS3_VFS_ROOT, RSX_LIVE_DRAW=1, PS3_VERBOSE=0 (last two only if unset)
  *   - keeps the logs of the last 10 runs in logs\, writes run.log / run.err.log
  *   - gives the game window this launcher's icon and taskbar identity
- *   - reads CivRev.ini (made on first run): vibration=on/off -> PAD_RUMBLE
+ *   - reads CivRev.ini (made on first run): vibration=on/off -> PAD_RUMBLE,
+ *     [debug] auto_capture=on/off (default off) -> LD_BLACK_CAPTURES=0 when off
  *   - shows the [CRASH]/[ABORT]/[STACKOVERFLOW] lines if the game exits badly
  *
  * Keep CivRev.exe in the civrev-port folder (it finds everything relative to
@@ -211,11 +212,37 @@ static const char k_default_ini[] =
     "; then start the game again.\r\n"
     "[game]\r\n"
     "; Controller vibration: on or off\r\n"
-    "vibration=on\r\n";
+    "vibration=on\r\n"
+    "[debug]\r\n"
+    "; Automatic frame capture when the screen goes black (~1 GB each, for bug reports): on or off\r\n"
+    "auto_capture=off\r\n";
+
+static int ini_is_on(const wchar_t *v)
+{
+    return !_wcsicmp(v, L"on") || !_wcsicmp(v, L"1") || !_wcsicmp(v, L"yes") || !_wcsicmp(v, L"true");
+}
+
+/* CivRev.ini -> environment for the game. */
+static void apply_settings_from(const wchar_t *ini)
+{
+    wchar_t v[32];
+    GetPrivateProfileStringW(L"game", L"vibration", L"on", v, 32, ini);
+    const int off = !_wcsicmp(v, L"off") || !_wcsicmp(v, L"0") || !_wcsicmp(v, L"no") ||
+                    !_wcsicmp(v, L"false");
+    /* ps3recomp cellPad.c: PAD_RUMBLE=0 = no vibration. */
+    SetEnvironmentVariableW(L"PAD_RUMBLE", off ? L"0" : L"1");
+
+    /* ps3recomp rsx_live_draw.c captures up to 2 frames (~1 GB each) into
+     * build\captures\ when the screen goes black; LD_BLACK_CAPTURES=0 = never.
+     * F9 (manual capture) is not affected. */
+    GetPrivateProfileStringW(L"debug", L"auto_capture", L"off", v, 32, ini);
+    if (!ini_is_on(v))
+        set_default(L"LD_BLACK_CAPTURES", L"0");
+}
 
 static void apply_settings(void)
 {
-    wchar_t ini[PATHN], v[32];
+    wchar_t ini[PATHN];
     here_path(ini, L"CivRev.ini");
     if (!exists(ini)) {
         HANDLE f = CreateFileW(ini, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -225,11 +252,7 @@ static void apply_settings(void)
             CloseHandle(f);
         }
     }
-    GetPrivateProfileStringW(L"game", L"vibration", L"on", v, 32, ini);
-    const int off = !_wcsicmp(v, L"off") || !_wcsicmp(v, L"0") || !_wcsicmp(v, L"no") ||
-                    !_wcsicmp(v, L"false");
-    /* ps3recomp cellPad.c: PAD_RUMBLE=0 = no vibration. */
-    SetEnvironmentVariableW(L"PAD_RUMBLE", off ? L"0" : L"1");
+    apply_settings_from(ini);
 }
 
 /* ---- game window icon ------------------------------------------------- */
@@ -306,6 +329,7 @@ static void report_crash(DWORD code, const wchar_t *errlog)
         (unsigned long)code, shown ? wlines : L"", shown ? L"\n" : L"", g_here);
 }
 
+#ifndef CIVREV_LAUNCHER_TEST   /* launcher/tests/settings_test.c brings its own main */
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR args, int show)
 {
     (void)prev;
@@ -432,3 +456,4 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR args, int show)
         report_crash(code, err_log);
     return (int)code;
 }
+#endif /* CIVREV_LAUNCHER_TEST */
