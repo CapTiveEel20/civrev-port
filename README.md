@@ -41,6 +41,14 @@ Double-click `run.bat`. It sets `PS3_VFS_ROOT` to `..\civrev-gamefiles\vfs`, sta
 `build\civrev.exe ..\civrev-gamefiles\EBOOT.elf` and writes the output to `run.log` and
 `run.err.log`. Started without arguments, `civrev.exe` only prints its usage and exits.
 
+## Build kit (for players)
+`powershell -ExecutionPolicy Bypass -File tools\make_kit.ps1` packs `dist\CivRevPC-<version>.zip`:
+`Setup.bat`, [README-PLAYERS.txt](setup/README-PLAYERS.txt) and only the files needed to build
+(allowlist in `make_kit.ps1`; refuses uncommitted changes). The player extracts it and runs
+`Setup.bat`, which checks for Visual Studio and Python, copies their disc (`.iso` or folder,
+`BLES00238` only), checks their decrypted `EBOOT.elf`, downloads ps3recomp at the commit in
+`setup\ps3recomp.lock`, then lifts and compiles the game and the launcher. Tests: `setup\tests\`.
+
 ## Repository contents
 | Path | What |
 |---|---|
