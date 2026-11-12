@@ -62,7 +62,9 @@ try {
 
     # ---- Find-Python ----
     Assert ($null -eq (Find-Python @(, @('no-such-python-xyz')))) "Find-Python unknown command -> null"
-    Assert ($null -eq (Find-Python @(, @('cmd', '/c', 'exit 1')))) "Find-Python failing command -> null"
+    # where.exe fails (exit 2) without interpreting the appended code; 'cmd /c' would treat
+    # '>=(3,10)' as a redirection and create a stray file named '(3'.
+    Assert ($null -eq (Find-Python @(, @('where.exe', 'no-such-python-xyz')))) "Find-Python failing command -> null"
     $py = Find-Python
     Assert ($py -and (Test-Path $py)) "Find-Python default finds an interpreter ($py)"
 
