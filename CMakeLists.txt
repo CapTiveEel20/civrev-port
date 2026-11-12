@@ -45,6 +45,16 @@ set(PS3RECOMP_RUNTIME_LIB "${PS3RECOMP_DIR}/build-release/ps3recomp_runtime.lib"
 file(GLOB RECOMP_SOURCES "src/recomp/*.cpp" "src/recomp/*.c")
 file(GLOB GEN_SOURCES    "src/gen/*.cpp" "src/gen/*.c")
 file(GLOB_RECURSE SPU_SOURCES "src/spu_gen/*.c")
+# The lifted SPU programs get their speed from the SSE4.1 forms of ps3recomp's
+# static-inline SPU helpers (byte shuffles, vector float ops in spu_helpers.h);
+# without the flag every one of them compiles to a slow scalar loop. The runtime
+# library is built with -msse4.1 itself, but this project links it prebuilt, so
+# the flag does not arrive by itself. Same results either way (ps3recomp
+# tests test_spu_int_x86, test_spu_float_exact). Any x86-64 CPU since ~2008.
+option(CIVREV_SPU_SSE41 "Compile lifted SPU code with SSE4.1" ON)
+if(CIVREV_SPU_SSE41)
+    set_source_files_properties(${SPU_SOURCES} PROPERTIES COMPILE_OPTIONS "-msse4.1")
+endif()
 if(NOT RECOMP_SOURCES)
     message(FATAL_ERROR "src/recomp/ is empty -- run tools\\relift.ps1 first")
 endif()
