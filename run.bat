@@ -35,12 +35,19 @@ if errorlevel 1 (
     )
 )
 set "PS3_VFS_ROOT=%GAME%\vfs"
+rem Total playtime (seconds) shown in the window caption, shared with CivRev.exe.
+set "PS3_PLAYTIME_FILE=%~dp0playtime.txt"
 rem Use ps3recomp's live-draw renderer. The default D3D12 backend draws this game
 rem upside down (it ignores the guest's viewport Y sign) with wrong font glyphs.
 if not defined RSX_LIVE_DRAW set "RSX_LIVE_DRAW=1"
 rem Per-frame log lines are slow here: run.log is unbuffered, ~150 us a line
 rem (measured), and the game wrote ~40 lines a frame. Set PS3_VERBOSE=1 for them.
 if not defined PS3_VERBOSE set "PS3_VERBOSE=0"
+rem Hand the GPU command ring out in 32 KB segments, as the real libgcm (and
+rem RPCS3) do: the renderer starts on a frame while the game is still writing
+rem it, instead of the two taking turns. Same save/view: 34-44 -> 48-63 FPS.
+rem Set GCM_FIFO_SEGMENT=0 for the old whole-ring behaviour.
+if not defined GCM_FIFO_SEGMENT set "GCM_FIFO_SEGMENT=0x8000"
 rem Keep the logs of the last 10 runs in logs\ so a crash report survives the
 rem next launch (newest run is always run.log / run.err.log).
 set "HERE=%~dp0"
