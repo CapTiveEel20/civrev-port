@@ -142,6 +142,23 @@ try {
     Clear-StepDone $tmp "lift"
     Assert (-not (Test-StepDone $tmp "lift")) "Clear-StepDone -> false"
 
+    # ---- Reset-StepsForNewRuntime (a newer kit pins another ps3recomp commit) ----
+    $kr = "$tmp\kit"
+    $shaA = "a" * 40; $shaB = "b" * 40
+    $deps = "ps3recomp-source", "ps3recomp", "lift", "compile"
+    $keep = "disc", "eboot", "menuart", "launcher", "extras"
+    Assert (-not (Reset-StepsForNewRuntime $kr $shaA)) "Reset-StepsForNewRuntime fresh kit -> false"
+    foreach ($m in $deps + $keep) { Set-StepDone $kr $m }
+    Assert (Reset-StepsForNewRuntime $kr $shaA) "Reset-StepsForNewRuntime 1.0 install (no stamp) -> true"
+    Assert (@($deps | Where-Object { Test-StepDone $kr $_ }).Count -eq 0) "Reset clears ps3recomp, lift and compile markers"
+    Assert (@($keep | Where-Object { Test-StepDone $kr $_ }).Count -eq $keep.Count) "Reset keeps disc, eboot, menuart, launcher, extras"
+    foreach ($m in $deps) { Set-StepDone $kr $m }
+    Set-RuntimeStamp $kr $shaA
+    Assert (-not (Reset-StepsForNewRuntime $kr $shaA)) "Reset-StepsForNewRuntime same commit -> false"
+    Assert (@($deps | Where-Object { Test-StepDone $kr $_ }).Count -eq $deps.Count) "same commit keeps all markers"
+    Assert (Reset-StepsForNewRuntime $kr $shaB) "Reset-StepsForNewRuntime other commit -> true"
+    Assert (-not (Test-StepDone $kr "compile")) "other commit clears compile"
+
     # ---- Remove-BuildLeftovers ----
     $port = "$tmp\port"
     $files = @{ "src\recomp\a.cpp" = 100; "src\gen\b.cpp" = 20; "src\spu_gen\c.c" = 30; "src\port\keep.cpp" = 7;

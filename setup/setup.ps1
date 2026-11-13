@@ -296,6 +296,7 @@ function Get-Ps3Recomp {
         Expand-Archive -LiteralPath $zip -DestinationPath $tmp
         Move-Item -LiteralPath (Join-Path $tmp "ps3recomp-$sha") -Destination $Rc
         Remove-Item -LiteralPath $tmp, $zip -Recurse -Force
+        Set-RuntimeStamp $KitRoot $sha
         Set-StepDone $KitRoot "ps3recomp-source"
     }
     $venvPy = Join-Path $Rc ".venv\Scripts\python.exe"
@@ -350,6 +351,10 @@ New-Item -ItemType Directory -Force -Path $KitRoot | Out-Null
 Log "" ; Log "==== Civilization Revolution PC build kit - Setup $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ====" White
 Log "Kit folder: $KitRoot"
 if (-not (Test-Path -LiteralPath (Join-Path $Port "setup\setup.ps1"))) { Fail "start" "civrev-port\ not found in $KitRoot." }
+if (Reset-StepsForNewRuntime $KitRoot (Read-LockSha (Join-Path $PSScriptRoot "ps3recomp.lock"))) {
+    Log "This kit is newer than your install: Setup downloads the new ps3recomp runtime" Cyan
+    Log "and rebuilds the game. Your disc copy and your saves are kept." Cyan
+}
 
 Invoke-Step "1/8 Check tools"            ""          { Test-Tools }
 Invoke-Step "2/8 Copy your game disc"    "disc"      { Copy-Disc }

@@ -156,6 +156,28 @@ function Clear-StepDone([string]$KitRoot, [string]$Name) {
     Remove-Item -LiteralPath (Get-StepMarker $KitRoot $Name) -Force -ErrorAction SilentlyContinue
 }
 
+# The ps3recomp commit the installed runtime was downloaded at: <KitRoot>\.setup\ps3recomp.sha
+function Set-RuntimeStamp([string]$KitRoot, [string]$Sha) {
+    $p = Join-Path $KitRoot ".setup\ps3recomp.sha"
+    New-Item -ItemType Directory -Force -Path (Split-Path $p) | Out-Null
+    Set-Content -LiteralPath $p -Value $Sha
+}
+
+# A newer kit extracted over an older install pins another ps3recomp commit.
+# Forget the steps that depend on it (download, runtime build, code generation,
+# compile) so Setup redoes them; disc, EBOOT and launcher are kept.
+# Installs from kit 1.0 have no stamp and count as "other commit".
+# Returns $true when steps were reset.
+function Reset-StepsForNewRuntime([string]$KitRoot, [string]$Sha) {
+    if (-not (Test-StepDone $KitRoot "ps3recomp-source")) { return $false }
+    $p = Join-Path $KitRoot ".setup\ps3recomp.sha"
+    $had = ""
+    if (Test-Path -LiteralPath $p) { $had = ([string](Get-Content -LiteralPath $p -Raw)).Trim() }
+    if ($had -eq $Sha) { return $false }
+    foreach ($m in "ps3recomp-source", "ps3recomp", "lift", "compile") { Clear-StepDone $KitRoot $m }
+    return $true
+}
+
 # Delete what is only needed to rebuild (generated code, compiler output);
 # keep build\civrev.exe and build\civrev.map. Returns the bytes freed.
 function Remove-BuildLeftovers([string]$PortDir) {
