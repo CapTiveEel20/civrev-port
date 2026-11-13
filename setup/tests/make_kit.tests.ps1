@@ -26,7 +26,7 @@ $expected = @(
     "civrev-port/CMakeLists.txt", "civrev-port/build.ps1", "civrev-port/LICENSE",
     "civrev-port/src/port/civrev_hle.cpp",
     "civrev-port/src/compat/dirent.h", "civrev-port/src/compat/unistd.h", "civrev-port/src/compat/LICENSE-tornado",
-    "civrev-port/tools/relift.ps1", "civrev-port/tools/fix_import_stub_toc.py", "civrev-port/tools/fix_inline_opd_funcs.py",
+    "civrev-port/tools/relift.ps1", "civrev-port/tools/fix_import_stub_toc.py", "civrev-port/tools/fix_inline_opd_funcs.py", "civrev-port/tools/patch_menu_assets.py",
     "civrev-port/launcher/CivRev.c", "civrev-port/launcher/CivRev.rc", "civrev-port/launcher/build_launcher.ps1",
     "civrev-port/setup/setup.ps1", "civrev-port/setup/kitlib.ps1", "civrev-port/setup/ps3recomp.lock"
 ) | ForEach-Object { "CivRevPC/$_" } | Sort-Object

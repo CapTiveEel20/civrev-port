@@ -19,7 +19,7 @@ $Allow = @(
     "CMakeLists.txt", "build.ps1", "LICENSE",
     "src/port/civrev_hle.cpp",
     "src/compat/dirent.h", "src/compat/unistd.h", "src/compat/LICENSE-tornado",
-    "tools/relift.ps1", "tools/fix_import_stub_toc.py", "tools/fix_inline_opd_funcs.py",
+    "tools/relift.ps1", "tools/fix_import_stub_toc.py", "tools/fix_inline_opd_funcs.py", "tools/patch_menu_assets.py",
     "launcher/CivRev.c", "launcher/CivRev.rc", "launcher/build_launcher.ps1",
     "setup/setup.ps1", "setup/kitlib.ps1", "setup/ps3recomp.lock"
 )

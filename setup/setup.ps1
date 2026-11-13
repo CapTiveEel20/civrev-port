@@ -351,19 +351,22 @@ Log "" ; Log "==== Civilization Revolution PC build kit - Setup $(Get-Date -Form
 Log "Kit folder: $KitRoot"
 if (-not (Test-Path -LiteralPath (Join-Path $Port "setup\setup.ps1"))) { Fail "start" "civrev-port\ not found in $KitRoot." }
 
-Invoke-Step "1/7 Check tools"            ""          { Test-Tools }
-Invoke-Step "2/7 Copy your game disc"    "disc"      { Copy-Disc }
-Invoke-Step "3/7 Check your EBOOT"       "eboot"     { Copy-Eboot }
-Invoke-Step "4/7 ps3recomp runtime"      "ps3recomp" { Get-Ps3Recomp }
+Invoke-Step "1/8 Check tools"            ""          { Test-Tools }
+Invoke-Step "2/8 Copy your game disc"    "disc"      { Copy-Disc }
+Invoke-Step "3/8 Check your EBOOT"       "eboot"     { Copy-Eboot }
+Invoke-Step "4/8 Tidy the multiplayer menu art" "menuart" {
+    Invoke-Logged "Menu art" $script:Python @((Join-Path $Port "tools\patch_menu_assets.py"), $Vfs)
+}
+Invoke-Step "5/8 ps3recomp runtime"      "ps3recomp" { Get-Ps3Recomp }
 $env:PS3RECOMP_DIR = $Rc
-Invoke-Step "5/7 Generate code from your EBOOT (a few minutes)" "lift" {
+Invoke-Step "6/8 Generate code from your EBOOT (a few minutes)" "lift" {
     Invoke-Script "Code generation" (Join-Path $Port "tools\relift.ps1") @("-PS3Recomp", $Rc, "-Elf", (Join-Path $Game "EBOOT.elf"))
 }
-Invoke-Step "6/7 Compile the game (5 to 30+ minutes, depends on your CPU)" "compile" {
+Invoke-Step "7/8 Compile the game (5 to 30+ minutes, depends on your CPU)" "compile" {
     Invoke-Script "Compiling" (Join-Path $Port "build.ps1")
     if (-not (Test-Path -LiteralPath (Join-Path $Port "build\civrev.exe"))) { throw "build\civrev.exe was not produced." }
 }
-Invoke-Step "7/7 Build the launcher" "launcher" {
+Invoke-Step "8/8 Build the launcher" "launcher" {
     Invoke-Script "Launcher" (Join-Path $Port "launcher\build_launcher.ps1")
 }
 Invoke-Step "Extras" "extras" { Invoke-Extras }
