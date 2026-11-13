@@ -41,9 +41,10 @@ game's PS3 program is translated into PC code, on your computer, during setup.
 5. [Playing](#playing)
 6. [Known problems](#known-problems)
 7. [Help and common questions](#help-and-common-questions)
-8. [Uninstalling](#uninstalling)
-9. [For developers](#for-developers)
-10. [Legal and credits](#legal-and-credits)
+8. [Contact](#contact)
+9. [Uninstalling](#uninstalling)
+10. [For developers](#for-developers)
+11. [Legal and credits](#legal-and-credits)
 
 ---
 
@@ -204,6 +205,18 @@ The launcher shows a message. Please report it with `civrev-port\run.err.log`
 **Can I share the game folder with a friend?**
 No. After Setup, the folder contains your copy of the game and a program made
 from the game's code. Point your friend to this page instead.
+
+---
+
+## Contact
+Questions, problems or ideas? You can reach me in two ways:
+- **GitHub:** open an [issue](https://github.com/CapTiveEel20/civrev-port/issues).
+  This is the best place for bug reports: attach `setup.log` (Setup problems) or
+  `civrev-port\run.err.log` (game problems).
+- **Discord:** my username is **captiveeel20**. Send me a friend request or a
+  message.
+
+Please don't send or ask for game files, `EBOOT` files or ISOs: I can't share them.
 
 ---
 
