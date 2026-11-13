@@ -23,7 +23,8 @@ $Allow = @(
     "launcher/CivRev.c", "launcher/CivRev.rc", "launcher/build_launcher.ps1",
     "setup/setup.ps1", "setup/kitlib.ps1", "setup/ps3recomp.lock"
 )
-$Top = @("setup/Setup.bat", "setup/README-PLAYERS.txt")    # go to the kit's top folder
+$Top = @("setup/Setup.bat", "setup/README-PLAYERS.txt",   # go to the kit's top folder
+         "setup/Controller vibration - how to turn it on or off.txt")
 
 $dirty = git status --porcelain
 if ($dirty) {

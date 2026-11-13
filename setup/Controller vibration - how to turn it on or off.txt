@@ -1,0 +1,61 @@
+Civilization Revolution PC - Controller vibration: how to turn it on or off
+==========================================================================
+
+Vibration is ON by default. The game itself has no menu option for it, so it is
+switched in a small settings file called CivRev.ini. It takes about one minute.
+
+
+BEFORE YOU START
+----------------
+CivRev.ini is created the first time you start the game. If you have never
+started the game yet, start it once, then close it.
+
+
+STEP BY STEP
+------------
+1. Close the game if it is running.
+
+2. Find the file CivRev.ini. It is in the "civrev-port" folder inside the
+   folder where you extracted this kit, for example:
+       C:\Games\CivRevPC\civrev-port\CivRev.ini
+   Shortcut: right-click the "Civilization Revolution" icon on your desktop
+   and choose "Open file location". The folder that opens contains CivRev.ini.
+   (Windows may hide the ".ini" part of the name and show just "CivRev" with
+   the type "Configuration settings". That is the right file.)
+
+3. Open it with Notepad: right-click CivRev.ini, choose "Open with",
+   then "Notepad".
+
+4. Find this line (it is under the line [game]):
+
+       vibration=on
+
+   To turn vibration OFF, change it to:
+
+       vibration=off
+
+   To turn vibration back ON, change it back to:
+
+       vibration=on
+
+5. Save the file: press Ctrl+S (or File > Save), then close Notepad.
+
+6. Start the game. The new setting is used from this start on.
+
+
+GOOD TO KNOW
+------------
+- The change is read when the game starts. Changing the file while the game
+  is running does nothing until the next start.
+- "off", "0", "no" and "false" all mean OFF. Anything else means ON.
+- If you delete CivRev.ini, the game makes a new one the next time it starts,
+  with vibration ON.
+- This setting only changes vibration. Your saves are not affected.
+
+
+STILL VIBRATING?
+----------------
+- Check that the line says exactly vibration=off (no spaces in the middle)
+  and that it is below the line [game].
+- Check that you saved the file before closing Notepad.
+- Close the game completely and start it again.

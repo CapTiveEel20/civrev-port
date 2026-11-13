@@ -69,6 +69,8 @@ Your saves:     civrev-port\gamedata\   (back this folder up, never delete it)
 Settings:       civrev-port\CivRev.ini  (made on first start; edit with Notepad)
                   [game]  vibration=on|off
                   [debug] auto_capture=on|off
+Controller vibration, step by step: see
+  "Controller vibration - how to turn it on or off.txt" in the kit folder.
 Logs:           civrev-port\run.err.log (the last 10 runs are kept in civrev-port\logs\)
 If the game crashes, the launcher shows a message; please include run.err.log
 when you report a problem.

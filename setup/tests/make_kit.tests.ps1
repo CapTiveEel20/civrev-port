@@ -22,7 +22,7 @@ $userName = [regex]::Escape($env:USERNAME)
 $leakPattern = "\\Users\\$userName\b|/Users/$userName\b|[A-Za-z0-9._%+-]+@(gmail|outlook|hotmail|live|yahoo|icloud)\.com"
 
 $expected = @(
-    "Setup.bat", "README-PLAYERS.txt",
+    "Setup.bat", "README-PLAYERS.txt", "Controller vibration - how to turn it on or off.txt",
     "civrev-port/CMakeLists.txt", "civrev-port/build.ps1", "civrev-port/LICENSE",
     "civrev-port/src/port/civrev_hle.cpp",
     "civrev-port/src/compat/dirent.h", "civrev-port/src/compat/unistd.h", "civrev-port/src/compat/LICENSE-tornado",

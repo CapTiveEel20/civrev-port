@@ -153,6 +153,9 @@ Start the game with the **Civilization Revolution** desktop shortcut, or with
 - **Your saves** are in `civrev-port\gamedata\`. Back this folder up and never delete it.
 - **Settings** are in `civrev-port\CivRev.ini` (created on the first start; open it
   with Notepad). For example: `vibration=on` or `vibration=off` for controller vibration.
+- **Turning controller vibration off (or back on):** vibration is on by default. The
+  kit includes a step-by-step guide next to `Setup.bat`:
+  *Controller vibration - how to turn it on or off.txt*.
 
 ---
 
