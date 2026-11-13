@@ -52,6 +52,17 @@ setup.log in the kit folder. Fix the problem and run Setup.bat again:
 finished steps are skipped.
 
 
+UPDATING FROM AN OLDER KIT (for example 1.0 -> 1.1)
+---------------------------------------------------
+1. Extract the new zip to the same place as before, so its CivRevPC folder
+   lands on top of your existing one ("Replace the files in the
+   destination").
+2. Run Setup.bat again. It notices the new version, downloads the new
+   ps3recomp runtime and rebuilds the game; your disc copy is kept. It takes
+   about as long as the compile step did the first time.
+3. Your saves in civrev-port\gamedata\ are kept.
+
+
 PLAY
 ----
 Start civrev-port\CivRev.exe (or the desktop shortcut).

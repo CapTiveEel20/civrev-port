@@ -117,7 +117,7 @@ version of the game.
 
 ## Step 2: install
 1. Go to [Releases](https://github.com/CapTiveEel20/civrev-port/releases) and
-   download **`CivRevPC-<version>.zip`** (for example `CivRevPC-1.0.zip`,
+   download **`CivRevPC-<version>.zip`** (for example `CivRevPC-1.1.zip`,
    under "Assets").
 2. Right-click the zip → **Extract All…** and choose a folder with enough free
    space, for example `C:\Games`. Don't run anything from inside the zip.
@@ -154,6 +154,16 @@ Everything Setup did is written to `setup.log` in the same folder. That file
 contains thousands of "warning" lines from the compiler: **those are normal
 and harmless**.
 
+### Updating from an older version (for example 1.0 → 1.1)
+1. Download the new `CivRevPC-<version>.zip` and extract it **into the same
+   place as before**, so its `CivRevPC` folder lands on top of your existing
+   one. When Windows asks, choose **Replace the files in the destination**.
+2. Double-click **`Setup.bat`** again. It notices the new version, downloads
+   the new ps3recomp runtime and rebuilds the game. Your disc copy is kept, so
+   it doesn't ask for your files again. Expect about as long as the
+   "Compile the game" step took the first time.
+3. **Your saves are kept** (`civrev-port\gamedata\` is not touched).
+
 ---
 
 ## Playing
@@ -172,8 +182,12 @@ Start the game with the **Civilization Revolution** desktop shortcut, or with
 ---
 
 ## Known problems
-Version 1.0 has so far been tested on one PC (the developer's).
+Version 1.1 has so far been tested on one PC (the developer's).
 - Some 3D models are not drawn perfectly yet.
+- **See-through shallow water after loading a second save:** if you load a
+  saved game, then go back to the menu and load another one without closing
+  the game, shallow water can turn transparent. Close and restart the game
+  before loading the other save.
 - Short stutters can happen the first time some effects appear (the game
   prepares them on the fly; the PS3 did this too).
 - **Online multiplayer does not work:** the game's online service was shut
