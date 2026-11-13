@@ -238,7 +238,6 @@ system (graphics → Direct3D 12, audio → WASAPI, controller → XInput).
 The kit uses the fork [CapTiveEel20/ps3recomp](https://github.com/CapTiveEel20/ps3recomp)
 at the commit in `setup/ps3recomp.lock`. The project layout follows
 [sp00nznet/tornado](https://github.com/sp00nznet/tornado).
-Progress notes: [docs/progress.md](docs/progress.md), [docs/feasibility.md](docs/feasibility.md).
 
 **Requirements:** Visual Studio 2022 with *C++ Clang Compiler for Windows* and
 *C++ CMake tools for Windows*; a ps3recomp checkout with its Python `.venv` and
@@ -280,7 +279,6 @@ changes). Tests: `setup\tests\*.tests.ps1`.
 | `tools/import_coverage.py` | Checks the game's firmware imports against ps3recomp's handlers |
 | `src/port/civrev_hle.cpp` | Civ Rev-specific overrides of PS3 system functions |
 | `src/compat/` | POSIX header shims for Windows |
-| `docs/` | Progress log and feasibility analysis |
 
 </details>
 
