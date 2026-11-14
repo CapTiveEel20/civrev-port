@@ -103,51 +103,60 @@ try {
     $elf10 = Join-Path $PSScriptRoot "..\..\..\civrev-gamefiles\EBOOT.elf"   # default sibling layout
     $realUpd = $env:CIVREV_UPDATE_DIR
     $elf130 = $env:CIVREV_EBOOT_130
+    # Setup must not find this PC's own RPCS3: every case below controls where the update is.
+    $env:CIVREV_NO_RPCS3_SEARCH = "1"
 
     # ---- unknown game version in the kit ----
     $k = New-Kit "9.9"; $kits += $k
     $r = Invoke-Setup $k @("-Disc", "$k\disc", "-Eboot", $enc)
     Assert ($r.Code -eq 1) "unknown game-version.txt -> exit 1 (got $($r.Code))"
     Assert ($r.Out -match "Unknown game version '9.9'") "unknown game-version.txt -> says so"
-    # ---- 1.30 kit, folder without the update (the game's own data cache: no APP_VER) ----
-    $k = New-Kit "1.30"; $kits += $k
-    New-TestSfo "$k\disc\PS3_GAME\PARAM.SFO" "BLES00238"
-    New-TestSfo "$k\cache\PARAM.SFO" "BLES00238"
-    $r = Invoke-Setup $k @("-Disc", "$k\disc", "-Update", "$k\cache", "-Eboot", $enc)
-    Assert ($r.Code -eq 1) "1.30 kit, no update installed -> exit 1 (got $($r.Code))"
-    Assert ($r.Log -match "Game version: 1.30") "1.30 kit -> log names game version 1.30"
-    Assert ($r.Log -match "3/9 Copy the game update 1.30") "1.30 kit -> step 3/9 copies the update"
-    Assert ($r.Log -match "not the update 1.30" -and $r.Log -match "Install Packages") "1.30 kit, no update -> log explains installing the update in RPCS3"
-    Assert ($r.Log -notmatch "Check your EBOOT") "1.30 kit, no update -> stopped before the EBOOT step"
-    # ---- 1.30 kit, update folder that does not exist ----
-    $k = New-Kit "1.30"; $kits += $k
-    New-TestSfo "$k\disc\PS3_GAME\PARAM.SFO" "BLES00238"
-    $r = Invoke-Setup $k @("-Disc", "$k\disc", "-Update", "$k\nowhere", "-Eboot", $enc)
-    Assert ($r.Code -eq 1 -and $r.Log -match "Folder not found") "1.30 kit, missing update folder -> 'Folder not found'"
-    # ---- 1.0 kit: 8 steps, no update step ----
-    $k = New-Kit; $kits += $k
-    New-TestSfo "$k\disc\PS3_GAME\PARAM.SFO" "BLES00238"
-    $r = Invoke-Setup $k @("-Disc", "$k\disc", "-Eboot", $enc)
-    Assert ($r.Log -match "Game version: 1.0" -and $r.Log -match "3/8 Check your EBOOT" -and $r.Log -notmatch "game update") "1.0 kit -> 8 steps, no update step"
-    # ---- 1.30 kit given the 1.0 EBOOT ----
-    if ($realUpd -and (Test-Path "$realUpd\USRDIR\patch") -and (Test-Path $elf10)) {
+    # ---- both kits: the same 8 steps, the same two questions ----
+    foreach ($gv in "1.0", "1.30") {
+        $k = New-Kit $gv; $kits += $k
+        New-TestSfo "$k\disc\PS3_GAME\PARAM.SFO" "BLES00238"
+        $r = Invoke-Setup $k @("-Disc", "$k\disc", "-Eboot", $enc)
+        Assert ($r.Log -match "Game version: $([regex]::Escape($gv))" -and $r.Log -match "3/8 Check your EBOOT" -and $r.Log -notmatch "/9 ") "$gv kit -> 8 steps, EBOOT is step 3/8"
+        Assert ($r.Log -match "still encrypted") "$gv kit, encrypted EBOOT -> 'still encrypted'"
+    }
+    if ($elf130 -and (Test-Path $elf130) -and $realUpd -and (Test-Path "$realUpd\USRDIR\patch")) {
+        # ---- 1.30 kit, the 1.30 EBOOT.elf alone (moved away from the update) ----
         $k = New-Kit "1.30"; $kits += $k
         New-TestSfo "$k\disc\PS3_GAME\PARAM.SFO" "BLES00238"
-        $r = Invoke-Setup $k @("-Disc", "$k\disc", "-Update", "$realUpd\USRDIR", "-Eboot", $elf10)
-        Assert ($r.Code -eq 1) "1.30 kit + 1.0 EBOOT -> exit 1 (got $($r.Code))"
-        Assert ($r.Log -match "is game version 1.0, but this kit builds game version 1.30") "1.30 kit + 1.0 EBOOT -> names both versions"
-        Assert ($r.Log -match "game1.0.zip") "1.30 kit + 1.0 EBOOT -> points to the 1.0 kit"
-        Assert ((Get-ChildItem "$k\civrev-gamefiles\vfs\game\BLES00238\USRDIR\patch" -File).Count -eq 23) "1.30 kit -> update's 23 patch files copied (USRDIR given)"
-        Assert (-not (Test-Path "$k\ps3recomp")) "1.30 kit + 1.0 EBOOT -> stopped before downloading ps3recomp"
+        New-Item -ItemType Directory -Force "$k\moved" | Out-Null
+        Copy-Item -LiteralPath $elf130 -Destination "$k\moved\EBOOT.elf"
+        $r = Invoke-Setup $k @("-Disc", "$k\disc", "-Eboot", "$k\moved\EBOOT.elf")
+        Assert ($r.Code -eq 1) "1.30 kit, EBOOT.elf away from the update -> exit 1 (got $($r.Code))"
+        Assert ($r.Log -match "cannot find the rest of the update" -and $r.Log -match "do not copy it elsewhere") "1.30 kit, update not found -> says to decrypt where RPCS3 installed it"
+        Assert (-not (Test-Path "$k\civrev-gamefiles\EBOOT.elf")) "1.30 kit, update not found -> EBOOT.elf not taken"
+        # ---- 1.30 kit, EBOOT.elf decrypted where RPCS3 installed the update: found by itself ----
+        $k = New-Kit "1.30"; $kits += $k
+        New-TestSfo "$k\disc\PS3_GAME\PARAM.SFO" "BLES00238"
+        $usr = "$k\My RPCS3\dev_hdd0\game\BLES00238\USRDIR"
+        New-Item -ItemType Directory -Force $usr | Out-Null
+        Copy-Item -LiteralPath "$realUpd\PARAM.SFO" -Destination "$k\My RPCS3\dev_hdd0\game\BLES00238\"
+        Copy-Item -LiteralPath "$realUpd\USRDIR\patch" -Destination "$usr\patch" -Recurse
+        Copy-Item -LiteralPath $elf130 -Destination "$usr\EBOOT.elf"
+        $r = Invoke-Setup $k @("-Disc", "$k\disc", "-Eboot", "$usr\EBOOT.elf")
+        Assert ($r.Log.Contains("Update files: $k\My RPCS3\dev_hdd0\game\BLES00238")) "1.30 kit, EBOOT.elf next to the update -> update found without asking"
+        Assert ((Get-ChildItem "$k\civrev-gamefiles\vfs\game\BLES00238\USRDIR\patch" -File).Count -eq 23) "1.30 kit -> update's 23 files copied"
+        Assert ((Get-ChildItem "$k\civrev-gamefiles\EBOOT.elf").Length -gt 0 -and $r.Log -match "4/8 Tidy") "1.30 kit -> EBOOT step done, Setup goes on (stops at the test disc's missing menu art)"
+        Assert (-not (Test-Path "$k\ps3recomp")) "1.30 kit -> test stopped before downloading ps3recomp"
         # ---- the same folder, now with the 1.0 kit: update data removed, version switch noticed ----
         Set-Content -LiteralPath "$k\civrev-port\setup\game-version.txt" -Value "1.0"
-        New-Item -ItemType Directory -Force "$k\.setup" | Out-Null
-        Set-Content -LiteralPath "$k\.setup\eboot.done" -Value "x"
         $r = Invoke-Setup $k @("-Disc", "$k\disc", "-Eboot", $enc)
         Assert ($r.Log -match "set up for game version 1.30; this kit builds game version 1.0") "1.0 kit over a 1.30 folder -> version switch noticed"
         Assert ($r.Log -match "Check your EBOOT" -and $r.Log -notmatch "Check your EBOOT : already done") "1.0 kit over a 1.30 folder -> EBOOT step redone"
         Assert (-not (Test-Path "$k\civrev-gamefiles\vfs\game\BLES00238\USRDIR\patch")) "1.0 kit over a 1.30 folder -> update data removed"
-    } else { Write-Host "SKIP 1.30 kit + 1.0 EBOOT (set CIVREV_UPDATE_DIR; needs ..\civrev-gamefiles\EBOOT.elf)" }
+    } else { Write-Host "SKIP 1.30 update search (set CIVREV_EBOOT_130 and CIVREV_UPDATE_DIR)" }
+    # ---- 1.30 kit given the 1.0 EBOOT ----
+    if (Test-Path $elf10) {
+        $k = New-Kit "1.30"; $kits += $k
+        New-TestSfo "$k\disc\PS3_GAME\PARAM.SFO" "BLES00238"
+        $r = Invoke-Setup $k @("-Disc", "$k\disc", "-Eboot", $elf10)
+        Assert ($r.Code -eq 1 -and $r.Log -match "is game version 1.0, but this kit builds game version 1.30") "1.30 kit + 1.0 EBOOT -> names both versions"
+        Assert ($r.Log -match "game1.0.zip") "1.30 kit + 1.0 EBOOT -> points to the 1.0 kit"
+    } else { Write-Host "SKIP 1.30 kit + 1.0 EBOOT (needs ..\civrev-gamefiles\EBOOT.elf)" }
     # ---- 1.0 kit given the 1.30 EBOOT ----
     if ($elf130 -and (Test-Path $elf130)) {
         $k = New-Kit "1.0"; $kits += $k

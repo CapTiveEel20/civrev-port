@@ -20,22 +20,30 @@ WHAT YOU NEED
 1. Your game disc as an .iso file, or the extracted disc folder
    (the folder that contains PS3_GAME and PS3_DISC.SFB).
 
-2. Only for game version 1.30: the game update, installed in the RPCS3
-   emulator (https://rpcs3.net): File > Install Packages/Raps/Edats, choose
-   the 1.30 update package of the game (a .pkg file). RPCS3 installs it into
-   dev_hdd0\game\BLES00238 inside the RPCS3 folder: Setup asks for that
-   folder and copies the update's own files from it (about 7 MB).
+2. The decrypted game program, EBOOT.elf, made with the RPCS3 emulator
+   (https://rpcs3.net).
 
-3. The decrypted game program, EBOOT.elf. Make it with RPCS3:
-   Utilities > Decrypt PS3 Binaries, then choose
-     - game version 1.0:  the disc's PS3_GAME\USRDIR\EBOOT.BIN
-     - game version 1.30: the update's EBOOT.BIN, in the RPCS3 folder:
-                          dev_hdd0\game\BLES00238\USRDIR\EBOOT.BIN
-   (copy it to an ordinary folder first). RPCS3 writes EBOOT.elf next to it.
-   (Setup refuses the still-encrypted EBOOT.BIN, and an EBOOT.elf of the
-   other game version: it tells you which kit that one needs.)
+   GAME VERSION 1.0 (from the disc):
+     a. Copy the disc's PS3_GAME\USRDIR\EBOOT.BIN to an ordinary folder.
+     b. RPCS3: Utilities > Decrypt PS3 Binaries, choose that EBOOT.BIN.
+     c. RPCS3 writes EBOOT.elf next to it: give that file to Setup.
 
-4. Two free programs that build the game: Visual Studio 2022 Build Tools
+   GAME VERSION 1.30 (from the update):
+     a. RPCS3: File > Install Packages/Raps/Edats, choose the game's 1.30
+        update package (a .pkg file). RPCS3 installs it in its own folder.
+     b. RPCS3: Utilities > Decrypt PS3 Binaries, choose the update's
+        EBOOT.BIN RIGHT WHERE RPCS3 INSTALLED IT (do not copy it first):
+          <RPCS3 folder>\dev_hdd0\game\BLES00238\USRDIR\EBOOT.BIN
+        (about 37 MB; the disc's is about 27 MB).
+     c. RPCS3 writes EBOOT.elf next to it: give that file to Setup.
+     Why there: the update is the new program PLUS 23 new files (menus,
+     translated text, models) that the game needs. Setup picks them up by
+     itself from next to your EBOOT.elf (it also checks your RPCS3 folder).
+
+   Setup refuses the still-encrypted EBOOT.BIN, and an EBOOT.elf of the
+   other game version (it tells you which kit that one needs).
+
+3. Two free programs that build the game: Visual Studio 2022 Build Tools
    (Microsoft's C++ compiler) and Python. You do not need to get them
    yourself: if they are missing, Setup offers to install them for you
    (answer Y). That downloads up to about 5 GB, takes 10 to 30 minutes, and
@@ -47,18 +55,17 @@ WHAT YOU NEED
    and "C++ CMake tools for Windows"; Python 3.10 or newer from
    https://www.python.org/downloads/ with "Add python.exe to PATH" ticked.)
 
-5. About 10 GB of free disk space where you extract this kit (plus about
+4. About 10 GB of free disk space where you extract this kit (plus about
    8 GB on C: if Setup installs the tools), and an internet connection.
 
-6. Windows 10 or 11, 64-bit.
+5. Windows 10 or 11, 64-bit.
 
 
 INSTALL
 -------
 1. Extract this whole zip to a folder you like (e.g. C:\Games\CivRevPC).
-2. Double-click Setup.bat. It asks for your .iso (or disc folder), for
-   game version 1.30 the installed update folder, and your EBOOT.elf, then
-   copies the disc, generates and compiles the game.
+2. Double-click Setup.bat. It asks for your .iso (or disc folder) and your
+   EBOOT.elf, then copies the disc, generates and compiles the game.
    On a fast PC this takes about 10 minutes; slower PCs take longer.
    While it works you see one progress line per step, for example
    "Compiling: 120 of 450 files (26%)". Leave the window open until it says
@@ -92,8 +99,7 @@ SWITCHING BETWEEN GAME VERSION 1.0 AND 1.30
    been tested with the other).
 2. Extract the kit for the other game version on top of your CivRevPC folder
    (as above) and run Setup.bat. It notices the change, asks for the
-   matching EBOOT.elf (and, for 1.30, the installed update folder) and
-   rebuilds the game. The disc copy is kept. Going back to 1.0 removes the
+   matching EBOOT.elf (see WHAT YOU NEED, point 2) and rebuilds the game. The disc copy is kept. Going back to 1.0 removes the
    update's files from the game folder.
 Or keep both: extract the two kits into two different folders and run
 Setup.bat in each (about 10 GB each; each has its own saves).

@@ -164,11 +164,41 @@ try {
     Assert (Test-Path "$cache\PARAM.SFO") "Remove-UpdateData keeps a PARAM.SFO without APP_VER (the game's own)"
     Assert (-not (Remove-UpdateData "$tmp\novfs" "BLES00238")) "Remove-UpdateData no folder -> false"
 
+    # ---- Get-Rpcs3Hdd0 ----
+    New-Item -ItemType Directory -Force "$tmp\emu\config" | Out-Null
+    Assert ((Get-Rpcs3Hdd0 "$tmp\emu") -eq "$tmp\emu\dev_hdd0") "Get-Rpcs3Hdd0 default -> <RPCS3>\dev_hdd0"
+    Set-Content "$tmp\emu\config\vfs.yml" @('$(EmulatorDir): ""', '/dev_hdd0/: $(EmulatorDir)dev_hdd0/', '/dev_hdd1/: $(EmulatorDir)dev_hdd1/')
+    Assert ((Get-Rpcs3Hdd0 "$tmp\emu") -eq "$tmp\emu\dev_hdd0") "Get-Rpcs3Hdd0 vfs.yml with the default entry"
+    Set-Content "$tmp\emu\config\vfs.yml" @('$(EmulatorDir): ""', '/dev_hdd0/: E:/PS3 Disk/hdd0/')
+    Assert ((Get-Rpcs3Hdd0 "$tmp\emu") -eq "E:\PS3 Disk\hdd0") "Get-Rpcs3Hdd0 vfs.yml moved to another drive"
+    Set-Content "$tmp\emu\config\vfs.yml" @('$(EmulatorDir): "F:/emu/"', '/dev_hdd0/: $(EmulatorDir)dev_hdd0/')
+    Assert ((Get-Rpcs3Hdd0 "$tmp\emu") -eq "F:\emu\dev_hdd0") "Get-Rpcs3Hdd0 vfs.yml custom EmulatorDir"
+
+    # ---- Find-UpdateRoot (synthetic complete update: 2 patch files, 30 bytes) ----
+    $v130.PatchFiles = 2; $v130.PatchBytes = 30
+    try {
+        $hdd = "$tmp\rp\dev_hdd0\game\BLES00238"
+        New-Item -ItemType Directory -Force "$hdd\USRDIR", "$tmp\rp\config", "$tmp\loose" | Out-Null
+        Copy-Item "$tmp\upd\PARAM.SFO" "$hdd\PARAM.SFO"
+        Copy-Item "$tmp\upd\USRDIR\patch" "$hdd\USRDIR\patch" -Recurse
+        Set-Content "$hdd\USRDIR\EBOOT.elf" "x"; Set-Content "$tmp\loose\EBOOT.elf" "x"
+        Assert ((Find-UpdateRoot "$hdd\USRDIR\EBOOT.elf" "BLES00238" "1.30") -eq $hdd) "Find-UpdateRoot EBOOT.elf decrypted next to the update -> found"
+        Assert ($null -eq (Find-UpdateRoot "$tmp\loose\EBOOT.elf" "BLES00238" "1.30")) "Find-UpdateRoot EBOOT.elf moved away, no RPCS3 -> null"
+        Assert ((Find-UpdateRoot "$tmp\loose\EBOOT.elf" "BLES00238" "1.30" @("$tmp\emu", "$tmp\rp")) -eq $hdd) "Find-UpdateRoot EBOOT.elf moved away -> found in RPCS3's dev_hdd0"
+        Remove-Item "$hdd\USRDIR\patch\b.dds"
+        Assert ($null -eq (Find-UpdateRoot "$hdd\USRDIR\EBOOT.elf" "BLES00238" "1.30" @("$tmp\rp"))) "Find-UpdateRoot incomplete update -> null"
+    } finally { $v130.PatchFiles = $savedFiles; $v130.PatchBytes = $savedBytes }
+    $env:CIVREV_NO_RPCS3_SEARCH = "1"
+    Assert (@(Find-Rpcs3Dirs).Count -eq 0) "Find-Rpcs3Dirs CIVREV_NO_RPCS3_SEARCH=1 -> nothing"
+    Remove-Item Env:\CIVREV_NO_RPCS3_SEARCH
+    $dirs = @(Find-Rpcs3Dirs)
+    Assert (@($dirs | Where-Object { -not (Test-Path (Join-Path $_ "rpcs3.exe")) }).Count -eq 0) "Find-Rpcs3Dirs returns only folders with rpcs3.exe ($($dirs.Count) found)"
+
     # ---- Get/Set-InstalledGameVersion, Reset-StepsForGameVersion ----
     $gk = "$tmp\gvkit"
     Assert ($null -eq (Get-InstalledGameVersion $gk)) "Get-InstalledGameVersion fresh folder -> null"
     Assert (-not (Reset-StepsForGameVersion $gk "1.30")) "Reset-StepsForGameVersion fresh folder -> false"
-    $vdeps = "update", "eboot", "lift", "compile"
+    $vdeps = "eboot", "lift", "compile"
     $vkeep = "disc", "menuart", "ps3recomp-source", "ps3recomp", "launcher", "extras"
     foreach ($m in $vdeps + $vkeep) { Set-StepDone $gk $m }
     Assert ((Get-InstalledGameVersion $gk) -eq "1.0") "Get-InstalledGameVersion pre-1.2 install (no stamp, EBOOT done) -> 1.0"

@@ -105,6 +105,63 @@ function Test-UpdateFolder([string]$Root, [string]$TitleId, [string]$Version) {
 }
 
 
+# RPCS3's dev_hdd0 folder for an RPCS3 folder: <dir>\dev_hdd0, or the path set
+# for /dev_hdd0/ in <dir>\config\vfs.yml (only there if the user moved it).
+function Get-Rpcs3Hdd0([string]$Rpcs3Dir) {
+    $yml = Join-Path $Rpcs3Dir "config\vfs.yml"
+    if (Test-Path -LiteralPath $yml -PathType Leaf) {
+        $emu = $Rpcs3Dir.TrimEnd('\') + '\'
+        foreach ($l in Get-Content -LiteralPath $yml) {
+            if ($l -match '^\s*\$\(EmulatorDir\):\s*"?([^"]+?)"?\s*$') { $emu = $matches[1] }
+        }
+        foreach ($l in Get-Content -LiteralPath $yml) {
+            if ($l -match '^\s*/dev_hdd0/:\s*"?([^"]*?)"?\s*$' -and $matches[1]) {
+                return ($matches[1].Replace('$(EmulatorDir)', $emu).Replace('/', '\')).TrimEnd('\')
+            }
+        }
+    }
+    return Join-Path $Rpcs3Dir "dev_hdd0"
+}
+
+# Folders that may hold RPCS3 (rpcs3.exe): a running RPCS3, RPCS3 shortcuts on
+# the Desktop, in the Start menu and pinned to the taskbar, and a few usual
+# install folders. Set CIVREV_NO_RPCS3_SEARCH=1 to skip (tests).
+function Find-Rpcs3Dirs {
+    if ($env:CIVREV_NO_RPCS3_SEARCH -eq "1") { return @() }
+    $found = New-Object Collections.Generic.List[string]
+    $add = { param($d) if ($d -and (Test-Path -LiteralPath (Join-Path $d "rpcs3.exe")) -and -not $found.Contains($d)) { $found.Add($d) } }
+    foreach ($p in @(Get-Process rpcs3 -ErrorAction SilentlyContinue)) { try { & $add (Split-Path $p.Path) } catch { } }
+    $places = @([Environment]::GetFolderPath("Desktop"), [Environment]::GetFolderPath("CommonDesktopDirectory"),
+                [Environment]::GetFolderPath("StartMenu"), [Environment]::GetFolderPath("CommonStartMenu"),
+                (Join-Path $env:APPDATA "Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"))
+    try {
+        $ws = New-Object -ComObject WScript.Shell
+        foreach ($pl in $places) {
+            if (-not $pl -or -not (Test-Path -LiteralPath $pl)) { continue }
+            foreach ($l in @(Get-ChildItem -LiteralPath $pl -Filter *.lnk -Recurse -ErrorAction SilentlyContinue)) {
+                $t = $ws.CreateShortcut($l.FullName).TargetPath
+                if ($t -and $t -match '(?i)\\rpcs3\.exe$') { & $add (Split-Path $t) }
+            }
+        }
+    } catch { }
+    foreach ($d in @("$env:SystemDrive\RPCS3", "$env:ProgramFiles\RPCS3", "$env:LOCALAPPDATA\RPCS3", "$env:USERPROFILE\RPCS3",
+                     "$env:USERPROFILE\Desktop\RPCS3", "$env:USERPROFILE\Documents\RPCS3", "$env:USERPROFILE\Downloads\RPCS3")) { & $add $d }
+    return @($found)
+}
+
+# Where the installed game update is, found without asking: the folder the
+# decrypted EBOOT.elf is in (decrypted where RPCS3 installed the update, i.e.
+# <dev_hdd0>\game\<title>\USRDIR), then <dev_hdd0>\game\<title> of each RPCS3
+# folder. The first complete update (Test-UpdateFolder ok) wins, or $null.
+function Find-UpdateRoot([string]$ElfPath, [string]$TitleId, [string]$Version, [string[]]$Rpcs3Dirs = @()) {
+    $cands = @(Resolve-UpdateRoot (Split-Path ([IO.Path]::GetFullPath($ElfPath)) -Parent))
+    foreach ($d in $Rpcs3Dirs) { $cands += Join-Path (Get-Rpcs3Hdd0 $d) "game\$TitleId" }
+    foreach ($c in $cands) {
+        if ((Test-UpdateFolder $c $TitleId $Version) -eq "ok") { return $c }
+    }
+    return $null
+}
+
 # Copy an installed update's own files into <Vfs>\game\<TitleId>\. Throws if the
 # copy does not match the source.
 function Copy-UpdateData([string]$Root, [string]$Vfs, [string]$TitleId) {
@@ -155,13 +212,13 @@ function Set-InstalledGameVersion([string]$KitRoot, [string]$Version) {
 }
 
 # A kit for the other game version extracted over an install: forget the steps
-# that depend on the game version (update data, EBOOT, code generation,
+# that depend on the game version (EBOOT + update data, code generation,
 # compile) so Setup redoes them. Disc copy, runtime, launcher and saves are
 # kept. Returns $true when steps were reset.
 function Reset-StepsForGameVersion([string]$KitRoot, [string]$Version) {
     $had = Get-InstalledGameVersion $KitRoot
     if (-not $had -or $had -eq $Version) { return $false }
-    foreach ($m in "update", "eboot", "lift", "compile") { Clear-StepDone $KitRoot $m }
+    foreach ($m in "eboot", "lift", "compile") { Clear-StepDone $KitRoot $m }
     return $true
 }
 

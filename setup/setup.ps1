@@ -7,7 +7,8 @@
     civrev-port\        port scripts and sources (this folder's parent)
     ps3recomp\          downloaded here at the pinned commit (setup\ps3recomp.lock)
     civrev-gamefiles\   EBOOT.elf + vfs\PS3_GAME\ copied from your disc
-                        (+ vfs\game\BLES00238\ update data for game 1.30)
+                        (+ vfs\game\BLES00238\ for game 1.30: the update's own
+                        files, found next to the EBOOT.elf or in RPCS3's dev_hdd0)
     setup.log           everything Setup did; send it when asking for help
 
   The game version this kit builds (1.0 or 1.30) is in setup\game-version.txt.
@@ -16,12 +17,11 @@
 .EXAMPLE
   Setup.bat
   Setup.bat -Disc "D:\Games\CivRev.iso" -Eboot "D:\EBOOT.elf" -Shortcut yes -Cleanup no
-  Setup.bat -Disc "D:\Games\CivRev.iso" -Update "D:\rpcs3\dev_hdd0\game\BLES00238" -Eboot "D:\EBOOT.elf"
 #>
 param(
     [string]$KitRoot,
     [string]$Disc,                                  # .iso file, or folder holding PS3_GAME\
-    [string]$Update,                                # game 1.30 only: the installed update folder (RPCS3 dev_hdd0\game\BLES00238)
+    [string]$Update,                                # game 1.30 only, optional: the installed update folder (normally found by itself)
     [string]$Eboot,                                 # decrypted EBOOT.elf
     [ValidateSet("", "yes", "no")][string]$Shortcut = "",
     [ValidateSet("", "yes", "no")][string]$Cleanup = "",
@@ -265,7 +265,33 @@ function Copy-Disc {
 
 # Where the EBOOT.BIN to decrypt comes from, for this kit's game version.
 $EbootBinSource = "the disc's PS3_GAME\USRDIR\EBOOT.BIN"
-if ($IsUpdate) { $EbootBinSource = "the update's EBOOT.BIN (in RPCS3: dev_hdd0\game\$TitleId\USRDIR\EBOOT.BIN)" }
+if ($IsUpdate) { $EbootBinSource = "the update's EBOOT.BIN where RPCS3 installed it: <RPCS3 folder>\dev_hdd0\game\$TitleId\USRDIR\EBOOT.BIN" }
+
+# Game 1.30: the update is the new program (EBOOT) PLUS its own data files
+# (USRDIR\patch\: menus, translated text, models), which the 1.30 game needs and
+# which are not on the disc. Find them without asking (Find-UpdateRoot: next to
+# the EBOOT.elf, then RPCS3's dev_hdd0), or the folder given with -Update.
+function Find-Update([string]$ElfPath) {
+    if ($Update) {
+        $root = Resolve-UpdateRoot $Update
+        $why = Test-UpdateFolder $root $TitleId $GameVersion
+        if ($why -ne "ok") { throw "-Update '$root' is not the complete game update ${GameVersion} ($why)." }
+        return $root
+    }
+    $rpcs3 = @(Find-Rpcs3Dirs)
+    foreach ($d in $rpcs3) { Log "   RPCS3 found: $d" }
+    $root = Find-UpdateRoot $ElfPath $TitleId $GameVersion $rpcs3
+    if (-not $root) {
+        throw "Your EBOOT.elf is game version $GameVersion, but Setup cannot find the rest of the update.`n" +
+              "The $GameVersion update is the new program PLUS its own files (menus, text, models), which the game needs.`n" +
+              "Setup looks for them next to your EBOOT.elf and in your RPCS3 folder. To fix it:`n" +
+              "  1. In RPCS3: File > Install Packages/Raps/Edats, choose the game's $GameVersion update package (.pkg).`n" +
+              "  2. In RPCS3: Utilities > Decrypt PS3 Binaries, choose $EbootBinSource`n" +
+              "     (right there, do not copy it elsewhere first).`n" +
+              "  3. Run Setup.bat again and choose the EBOOT.elf that RPCS3 writes next to it."
+    }
+    return $root
+}
 
 function Copy-Eboot {
     $dst = Join-Path $Game "EBOOT.elf"
@@ -296,39 +322,11 @@ function Copy-Eboot {
                   "decrypt $EbootBinSource with RPCS3."
         }
     }
+    $updateRoot = $null
+    if ($IsUpdate) { $updateRoot = Find-Update $src; Log "   Update files: $updateRoot" }
     New-Item -ItemType Directory -Force -Path $Game | Out-Null
     if ([IO.Path]::GetFullPath($src) -ne $dst) { Copy-Item -LiteralPath $src -Destination $dst -Force }
-}
-
-# Game 1.30: copy the installed update's own data (USRDIR\patch\: models, menus,
-# translated text) to where the game looks for it, /dev_hdd0/game/<title>/.
-function Copy-Update {
-    $src = $Update
-    if (-not $src) {
-        Write-Host "The installed game update ${GameVersion}: the folder dev_hdd0\game\$TitleId inside your RPCS3 folder"
-        Write-Host "(install the update package first with RPCS3: File > Install Packages/Raps/Edats)."
-        $src = Pick-Folder "Choose the installed update folder: <RPCS3>\dev_hdd0\game\$TitleId"
-    }
-    $root = Resolve-UpdateRoot $src
-    Log "   Update: $root"
-    switch (Test-UpdateFolder $root $TitleId $GameVersion) {
-        "ok" { }
-        "missing" { throw "Folder not found: $root" }
-        "no-sfo" {
-            throw "No PARAM.SFO in '$root'. Choose the folder dev_hdd0\game\$TitleId in your RPCS3 folder`n" +
-                  "(it appears after installing the update package with RPCS3: File > Install Packages/Raps/Edats)."
-        }
-        "wrong-title" { throw "This update is for '$(Get-SfoTitleId (Join-Path $root 'PARAM.SFO'))'. This kit needs the update for $TitleId." }
-        "wrong-version" {
-            $v = Get-SfoValue (Join-Path $root "PARAM.SFO") "APP_VER"
-            if (-not $v) { $v = "none" }
-            throw "This folder has game version '$v', not the update $GameVersion.`n" +
-                  "Install the $GameVersion update package with RPCS3 (File > Install Packages/Raps/Edats), then choose dev_hdd0\game\$TitleId again."
-        }
-        "no-patch" { throw "This folder has no USRDIR\patch folder, so the $GameVersion update is not installed in it." }
-        "incomplete" { throw "The update's USRDIR\patch folder is incomplete or changed. Install the $GameVersion update package with RPCS3 again." }
-    }
-    Copy-UpdateData $root $Vfs $TitleId
+    if ($updateRoot) { Copy-UpdateData $updateRoot $Vfs $TitleId }
 }
 
 function Get-Ps3Recomp {
@@ -419,7 +417,6 @@ $steps = @(
     @("Check tools", "", { Test-Tools }),
     @("Copy your game disc", "disc", { Copy-Disc })
 )
-if ($IsUpdate) { $steps += , @("Copy the game update $GameVersion", "update", { Copy-Update }) }
 $steps += @(
     @("Check your EBOOT", "eboot", { Copy-Eboot }),
     @("Tidy the multiplayer menu art", "menuart", {
