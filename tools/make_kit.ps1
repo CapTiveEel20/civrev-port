@@ -1,15 +1,21 @@
 <#
 .SYNOPSIS
-  Pack the player build kit: dist\CivRevPC-<version>.zip.
+  Pack the player build kit for one game version:
+  dist\CivRevPC-<version>-game<game version>.zip.
   Contains ONLY the files needed to build and play (the allowlist below), taken
-  from the last commit; refuses to run with uncommitted changes.
+  from the last commit; refuses to run with uncommitted changes. Adds
+  civrev-port\setup\game-version.txt, which tells Setup which game version
+  (1.0 = the disc, 1.30 = the official update) the kit builds.
   Zip layout: CivRevPC\Setup.bat, CivRevPC\README-PLAYERS.txt, CivRevPC\civrev-port\...
 
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File tools\make_kit.ps1
-  powershell -ExecutionPolicy Bypass -File tools\make_kit.ps1 -Version 1.0
+  powershell -ExecutionPolicy Bypass -File tools\make_kit.ps1 -Version 1.2 -GameVersion 1.0
+  powershell -ExecutionPolicy Bypass -File tools\make_kit.ps1 -Version 1.2 -GameVersion 1.30
 #>
-param([string]$Version)
+param(
+    [string]$Version,
+    [Parameter(Mandatory = $true)][ValidateSet("1.0", "1.30")][string]$GameVersion
+)
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
@@ -19,7 +25,7 @@ $Allow = @(
     "CMakeLists.txt", "build.ps1", "LICENSE",
     "src/port/civrev_hle.cpp",
     "src/compat/dirent.h", "src/compat/unistd.h", "src/compat/LICENSE-tornado",
-    "tools/relift.ps1", "tools/fix_import_stub_toc.py", "tools/fix_inline_opd_funcs.py", "tools/patch_menu_assets.py",
+    "tools/relift.ps1", "tools/code_end.py", "tools/fix_import_stub_toc.py", "tools/fix_inline_opd_funcs.py", "tools/patch_menu_assets.py",
     "launcher/CivRev.c", "launcher/CivRev.rc", "launcher/build_launcher.ps1",
     "setup/setup.ps1", "setup/kitlib.ps1", "setup/ps3recomp.lock"
 )
@@ -50,9 +56,10 @@ try {
     Expand-Archive -LiteralPath "$stage\port.zip" -DestinationPath $kit
     Expand-Archive -LiteralPath "$stage\top.zip" -DestinationPath "$stage\top"
     foreach ($f in $Top) { Move-Item -LiteralPath (Join-Path "$stage\top" $f) -Destination $kit }
+    Set-Content -LiteralPath (Join-Path $kit "civrev-port\setup\game-version.txt") -Value $GameVersion -Encoding ASCII
 
     New-Item -ItemType Directory -Force -Path (Join-Path $root "dist") | Out-Null
-    $zip = Join-Path $root "dist\CivRevPC-$Version.zip"
+    $zip = Join-Path $root "dist\CivRevPC-$Version-game$GameVersion.zip"
     Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
     # Entry by entry with '/' separators (ZipFile.CreateFromDirectory on Windows
     # PowerShell 5.1 writes '\', which non-Windows unzip tools mis-read).

@@ -7,17 +7,21 @@
     civrev-port\        port scripts and sources (this folder's parent)
     ps3recomp\          downloaded here at the pinned commit (setup\ps3recomp.lock)
     civrev-gamefiles\   EBOOT.elf + vfs\PS3_GAME\ copied from your disc
+                        (+ vfs\game\BLES00238\ update data for game 1.30)
     setup.log           everything Setup did; send it when asking for help
 
+  The game version this kit builds (1.0 or 1.30) is in setup\game-version.txt.
   Re-running Setup skips finished steps (markers in <KitRoot>\.setup\).
 
 .EXAMPLE
   Setup.bat
   Setup.bat -Disc "D:\Games\CivRev.iso" -Eboot "D:\EBOOT.elf" -Shortcut yes -Cleanup no
+  Setup.bat -Disc "D:\Games\CivRev.iso" -Update "D:\rpcs3\dev_hdd0\game\BLES00238" -Eboot "D:\EBOOT.elf"
 #>
 param(
     [string]$KitRoot,
     [string]$Disc,                                  # .iso file, or folder holding PS3_GAME\
+    [string]$Update,                                # game 1.30 only: the installed update folder (RPCS3 dev_hdd0\game\BLES00238)
     [string]$Eboot,                                 # decrypted EBOOT.elf
     [ValidateSet("", "yes", "no")][string]$Shortcut = "",
     [ValidateSet("", "yes", "no")][string]$Cleanup = "",
@@ -29,8 +33,11 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "kitlib.ps1")
 
 $TitleId   = "BLES00238"
-$EbootSha  = "b58d4cf93933cbd921384735f809bc00718550f9fdaf9b75c27ad620e95ee3e0"
 $MinFreeGB = 10
+try { $GameVersion = Read-KitGameVersion $PSScriptRoot }
+catch { Write-Host $_.Exception.Message -ForegroundColor Red; if (-not $NoPause) { Read-Host "Press Enter to close this window" | Out-Null }; exit 1 }
+$EbootSha  = $script:GameVersions[$GameVersion].EbootSha
+$IsUpdate  = $GameVersion -ne "1.0"
 if (-not $KitRoot) { $KitRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent }
 $KitRoot = [IO.Path]::GetFullPath($KitRoot)
 $Port = Join-Path $KitRoot "civrev-port"
@@ -256,29 +263,72 @@ function Copy-Disc {
     }
 }
 
+# Where the EBOOT.BIN to decrypt comes from, for this kit's game version.
+$EbootBinSource = "the disc's PS3_GAME\USRDIR\EBOOT.BIN"
+if ($IsUpdate) { $EbootBinSource = "the update's EBOOT.BIN (in RPCS3: dev_hdd0\game\$TitleId\USRDIR\EBOOT.BIN)" }
+
 function Copy-Eboot {
     $dst = Join-Path $Game "EBOOT.elf"
     $src = $Eboot
     if (-not $src) {
-        Write-Host "Your decrypted EBOOT.elf (made with RPCS3: Utilities > Decrypt PS3 Binaries)."
-        $src = Pick-File "Choose your decrypted EBOOT.elf" "Decrypted EBOOT (*.elf)|*.elf|All files (*.*)|*.*"
+        Write-Host "Your decrypted EBOOT.elf for game version $GameVersion (made with RPCS3: Utilities > Decrypt PS3 Binaries,"
+        Write-Host "from $EbootBinSource)."
+        $src = Pick-File "Choose your decrypted EBOOT.elf (game version $GameVersion)" "Decrypted EBOOT (*.elf)|*.elf|All files (*.*)|*.*"
     }
     Log "   EBOOT: $src"
     switch (Test-EbootFile $src $EbootSha) {
         "ok" { }
         "missing" { throw "File not found: $src" }
         "encrypted" {
-            throw "This EBOOT is still encrypted (it is the EBOOT.BIN straight from the disc).`n" +
-                  "Decrypt it with RPCS3: Utilities > Decrypt PS3 Binaries, choose PS3_GAME\USRDIR\EBOOT.BIN,`n" +
+            throw "This EBOOT is still encrypted (it is an EBOOT.BIN, not the decrypted EBOOT.elf).`n" +
+                  "Decrypt it with RPCS3: Utilities > Decrypt PS3 Binaries, choose $EbootBinSource,`n" +
                   "then give Setup the EBOOT.elf that RPCS3 writes next to it."
         }
         "not-elf" { throw "This is not a PS3 program file (no ELF header): $src" }
         "wrong-version" {
-            throw "This EBOOT.elf is a different version of the game. Only the decrypted EBOOT of the European disc $TitleId (no updates) is supported."
+            $other = Get-EbootGameVersion $src
+            if ($other) {
+                throw "This EBOOT.elf is game version $other, but this kit builds game version $GameVersion.`n" +
+                      "Either give Setup the EBOOT.elf decrypted from $EbootBinSource,`n" +
+                      "or download the kit for game version $other (CivRevPC-<kit version>-game$other.zip)."
+            }
+            throw "This EBOOT.elf is not a known version of the game. This kit needs game version $GameVersion of the European disc ${TitleId}:`n" +
+                  "decrypt $EbootBinSource with RPCS3."
         }
     }
     New-Item -ItemType Directory -Force -Path $Game | Out-Null
     if ([IO.Path]::GetFullPath($src) -ne $dst) { Copy-Item -LiteralPath $src -Destination $dst -Force }
+}
+
+# Game 1.30: copy the installed update's own data (USRDIR\patch\: models, menus,
+# translated text) to where the game looks for it, /dev_hdd0/game/<title>/.
+function Copy-Update {
+    $src = $Update
+    if (-not $src) {
+        Write-Host "The installed game update ${GameVersion}: the folder dev_hdd0\game\$TitleId inside your RPCS3 folder"
+        Write-Host "(install the update package first with RPCS3: File > Install Packages/Raps/Edats)."
+        $src = Pick-Folder "Choose the installed update folder: <RPCS3>\dev_hdd0\game\$TitleId"
+    }
+    $root = Resolve-UpdateRoot $src
+    Log "   Update: $root"
+    switch (Test-UpdateFolder $root $TitleId $GameVersion) {
+        "ok" { }
+        "missing" { throw "Folder not found: $root" }
+        "no-sfo" {
+            throw "No PARAM.SFO in '$root'. Choose the folder dev_hdd0\game\$TitleId in your RPCS3 folder`n" +
+                  "(it appears after installing the update package with RPCS3: File > Install Packages/Raps/Edats)."
+        }
+        "wrong-title" { throw "This update is for '$(Get-SfoTitleId (Join-Path $root 'PARAM.SFO'))'. This kit needs the update for $TitleId." }
+        "wrong-version" {
+            $v = Get-SfoValue (Join-Path $root "PARAM.SFO") "APP_VER"
+            if (-not $v) { $v = "none" }
+            throw "This folder has game version '$v', not the update $GameVersion.`n" +
+                  "Install the $GameVersion update package with RPCS3 (File > Install Packages/Raps/Edats), then choose dev_hdd0\game\$TitleId again."
+        }
+        "no-patch" { throw "This folder has no USRDIR\patch folder, so the $GameVersion update is not installed in it." }
+        "incomplete" { throw "The update's USRDIR\patch folder is incomplete or changed. Install the $GameVersion update package with RPCS3 again." }
+    }
+    Copy-UpdateData $root $Vfs $TitleId
 }
 
 function Get-Ps3Recomp {
@@ -350,29 +400,46 @@ function Invoke-Extras {
 New-Item -ItemType Directory -Force -Path $KitRoot | Out-Null
 Log "" ; Log "==== Civilization Revolution PC build kit - Setup $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ====" White
 Log "Kit folder: $KitRoot"
+Log "Game version: $GameVersion"
 if (-not (Test-Path -LiteralPath (Join-Path $Port "setup\setup.ps1"))) { Fail "start" "civrev-port\ not found in $KitRoot." }
 if (Reset-StepsForNewRuntime $KitRoot (Read-LockSha (Join-Path $PSScriptRoot "ps3recomp.lock"))) {
     Log "This kit is newer than your install: Setup downloads the new ps3recomp runtime" Cyan
     Log "and rebuilds the game. Your disc copy and your saves are kept." Cyan
 }
+$hadVersion = Get-InstalledGameVersion $KitRoot
+if (Reset-StepsForGameVersion $KitRoot $GameVersion) {
+    Log "This folder was set up for game version $hadVersion; this kit builds game version $GameVersion." Cyan
+    Log "Setup asks for the matching files and rebuilds the game. Your disc copy and your saves are kept." Cyan
+}
+if (-not $IsUpdate -and (Remove-UpdateData $Vfs $TitleId)) { Log "   Removed the game update's files (this kit builds game version 1.0)." }
+Set-InstalledGameVersion $KitRoot $GameVersion
 
-Invoke-Step "1/8 Check tools"            ""          { Test-Tools }
-Invoke-Step "2/8 Copy your game disc"    "disc"      { Copy-Disc }
-Invoke-Step "3/8 Check your EBOOT"       "eboot"     { Copy-Eboot }
-Invoke-Step "4/8 Tidy the multiplayer menu art" "menuart" {
-    Invoke-Logged "Menu art" $script:Python @((Join-Path $Port "tools\patch_menu_assets.py"), $Vfs)
-}
-Invoke-Step "5/8 ps3recomp runtime"      "ps3recomp" { Get-Ps3Recomp }
+# Steps: name, marker (finished steps are skipped on a re-run), body.
+$steps = @(
+    @("Check tools", "", { Test-Tools }),
+    @("Copy your game disc", "disc", { Copy-Disc })
+)
+if ($IsUpdate) { $steps += , @("Copy the game update $GameVersion", "update", { Copy-Update }) }
+$steps += @(
+    @("Check your EBOOT", "eboot", { Copy-Eboot }),
+    @("Tidy the multiplayer menu art", "menuart", {
+        Invoke-Logged "Menu art" $script:Python @((Join-Path $Port "tools\patch_menu_assets.py"), $Vfs)
+    }),
+    @("ps3recomp runtime", "ps3recomp", { Get-Ps3Recomp }),
+    @("Generate code from your EBOOT (a few minutes)", "lift", {
+        Invoke-Script "Code generation" (Join-Path $Port "tools\relift.ps1") @("-PS3Recomp", $Rc, "-Elf", (Join-Path $Game "EBOOT.elf"))
+    }),
+    @("Compile the game (5 to 30+ minutes, depends on your CPU)", "compile", {
+        Invoke-Script "Compiling" (Join-Path $Port "build.ps1")
+        if (-not (Test-Path -LiteralPath (Join-Path $Port "build\civrev.exe"))) { throw "build\civrev.exe was not produced." }
+    }),
+    @("Build the launcher", "launcher", {
+        Invoke-Script "Launcher" (Join-Path $Port "launcher\build_launcher.ps1")
+    })
+)
 $env:PS3RECOMP_DIR = $Rc
-Invoke-Step "6/8 Generate code from your EBOOT (a few minutes)" "lift" {
-    Invoke-Script "Code generation" (Join-Path $Port "tools\relift.ps1") @("-PS3Recomp", $Rc, "-Elf", (Join-Path $Game "EBOOT.elf"))
-}
-Invoke-Step "7/8 Compile the game (5 to 30+ minutes, depends on your CPU)" "compile" {
-    Invoke-Script "Compiling" (Join-Path $Port "build.ps1")
-    if (-not (Test-Path -LiteralPath (Join-Path $Port "build\civrev.exe"))) { throw "build\civrev.exe was not produced." }
-}
-Invoke-Step "8/8 Build the launcher" "launcher" {
-    Invoke-Script "Launcher" (Join-Path $Port "launcher\build_launcher.ps1")
+for ($i = 0; $i -lt $steps.Count; $i++) {
+    Invoke-Step ("{0}/{1} {2}" -f ($i + 1), $steps.Count, $steps[$i][0]) $steps[$i][1] $steps[$i][2]
 }
 Invoke-Step "Extras" "extras" { Invoke-Extras }
 

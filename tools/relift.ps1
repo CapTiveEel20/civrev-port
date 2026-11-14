@@ -26,12 +26,6 @@ $py    = Join-Path $PS3Recomp ".venv\Scripts\python.exe"
 $tools = Join-Path $PS3Recomp "tools"
 Set-Location $root
 
-# Executable sections of BLES00238's EBOOT (from its section headers):
-#   0x00010200 .init, 0x00010240-0x014150D8 .text, .fini,
-#   0x0141510C-0x01416CEC import stubs (0x1BE0 bytes = 223 stubs x 0x20).
-# --code-end sits just past the stubs, so --hle-stubs can rewrite them and
-# nothing above (read-only data in the same segment) is mistaken for code.
-$CodeEnd = "0x01416CEC"
 
 function Step($name, [scriptblock]$cmd) {
     Write-Host "==> $name" -ForegroundColor Cyan
@@ -42,6 +36,12 @@ function Step($name, [scriptblock]$cmd) {
 }
 
 if (-not (Test-Path $Elf)) { throw "Decrypted EBOOT not found: $Elf" }
+
+# --code-end = end of the last executable section (the import stubs), read from
+# this EBOOT's section headers: 0x01416CEC for 1.00, 0x0141FC5C for 1.30.
+$CodeEnd = & $py "$PSScriptRoot\code_end.py" $Elf
+if ($LASTEXITCODE -ne 0) { throw "Could not read the code end from $Elf" }
+Write-Host "EBOOT code ends at $CodeEnd"
 New-Item -ItemType Directory -Force analysis | Out-Null
 
 Step "1/5 load ELF (functions, imports, TOC)" {

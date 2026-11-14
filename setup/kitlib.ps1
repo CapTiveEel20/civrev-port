@@ -4,8 +4,9 @@
   defines functions). Tests: setup\tests\kitlib.tests.ps1.
 #>
 
-# TITLE_ID from a PS3 PARAM.SFO ("\0PSF" key/value file), or $null.
-function Get-SfoTitleId([string]$Path) {
+# A UTF-8 text value (e.g. TITLE_ID, APP_VER) from a PS3 PARAM.SFO ("\0PSF"
+# key/value file), or $null.
+function Get-SfoValue([string]$Path, [string]$Key) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
     try {
         $b = [IO.File]::ReadAllBytes($Path)
@@ -18,14 +19,41 @@ function Get-SfoTitleId([string]$Path) {
             $keyAt = $keyTab + [BitConverter]::ToUInt16($b, $e)
             $end = [Array]::IndexOf($b, [byte]0, [int]$keyAt)
             if ($end -lt 0) { return $null }
-            $key = [Text.Encoding]::ASCII.GetString($b, $keyAt, $end - $keyAt)
-            if ($key -ne "TITLE_ID") { continue }
+            $name = [Text.Encoding]::ASCII.GetString($b, $keyAt, $end - $keyAt)
+            if ($name -ne $Key) { continue }
+            if ([BitConverter]::ToUInt16($b, $e + 2) -eq 0x0404) { return $null }   # integer, not text
             $len = [BitConverter]::ToUInt32($b, $e + 4)
             $at = $dataTab + [BitConverter]::ToUInt32($b, $e + 12)
             return [Text.Encoding]::UTF8.GetString($b, $at, $len).TrimEnd([char]0)
         }
     } catch { }
     return $null
+}
+
+function Get-SfoTitleId([string]$Path) { Get-SfoValue $Path "TITLE_ID" }
+
+# ---------------------------------------------------------- game versions ----
+# Each kit builds ONE game version (civrev-port\setup\game-version.txt, written
+# by tools\make_kit.ps1). SHA-256 of the decrypted EBOOT.elf of each version:
+#   1.0   the European disc's own program (PS3_GAME\USRDIR\EBOOT.BIN)
+#   1.30  the official game update (installed: dev_hdd0\game\BLES00238\USRDIR\EBOOT.BIN)
+$script:GameVersions = [ordered]@{
+    "1.0"  = @{ EbootSha = "b58d4cf93933cbd921384735f809bc00718550f9fdaf9b75c27ad620e95ee3e0" }
+    "1.30" = @{ EbootSha = "26b2d04e30285041235dca1fdb5b105ad9a69418b2ca19bc5ccffacebfe97262"
+                AppVer = "01.30"
+                # The update's own data: USRDIR\patch\ (models, menus, translated text).
+                PatchFiles = 23; PatchBytes = 7417119 }
+}
+
+# The game version this kit builds: the first line of game-version.txt in
+# $SetupDir, or "1.0" when there is none (a developer checkout, or a kit
+# older than 1.2). Throws on an unknown version.
+function Read-KitGameVersion([string]$SetupDir) {
+    $p = Join-Path $SetupDir "game-version.txt"
+    if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { return "1.0" }
+    $v = ([string]@(Get-Content -LiteralPath $p)[0]).Trim()
+    if (-not $script:GameVersions.Contains($v)) { throw "Unknown game version '$v' in $p" }
+    return $v
 }
 
 # ok | missing | encrypted | not-elf | wrong-version
@@ -38,6 +66,103 @@ function Test-EbootFile([string]$Path, [string]$Sha256) {
     $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
     if ($hash -ine $Sha256) { return "wrong-version" }
     return "ok"
+}
+
+# The known game version ("1.0", "1.30") a decrypted EBOOT.elf belongs to, or $null.
+function Get-EbootGameVersion([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+    foreach ($v in $script:GameVersions.Keys) {
+        if ($hash -ieq $script:GameVersions[$v].EbootSha) { return $v }
+    }
+    return $null
+}
+
+# The folder of an installed game update that holds PARAM.SFO and USRDIR\.
+# Accepts that folder itself, its USRDIR, or USRDIR\patch.
+function Resolve-UpdateRoot([string]$Path) {
+    $p = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    if ((Split-Path $p -Leaf) -ieq "patch") { $p = Split-Path $p -Parent }
+    if ((Split-Path $p -Leaf) -ieq "USRDIR") { $p = Split-Path $p -Parent }
+    return $p
+}
+
+# Checks an installed game update folder (see Resolve-UpdateRoot):
+#   ok | missing | no-sfo | wrong-title | wrong-version | no-patch | incomplete
+function Test-UpdateFolder([string]$Root, [string]$TitleId, [string]$Version) {
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) { return "missing" }
+    $sfo = Join-Path $Root "PARAM.SFO"
+    $id = Get-SfoTitleId $sfo
+    if (-not $id) { return "no-sfo" }
+    if ($id -ne $TitleId) { return "wrong-title" }
+    $want = $script:GameVersions[$Version]
+    if ((Get-SfoValue $sfo "APP_VER") -ne $want.AppVer) { return "wrong-version" }
+    $patch = Join-Path $Root "USRDIR\patch"
+    if (-not (Test-Path -LiteralPath $patch -PathType Container)) { return "no-patch" }
+    $m = @(Get-ChildItem -LiteralPath $patch -Recurse -File -Force) | Measure-Object Length -Sum
+    if ($m.Count -ne $want.PatchFiles -or [long]$m.Sum -ne [long]$want.PatchBytes) { return "incomplete" }
+    return "ok"
+}
+
+
+# Copy an installed update's own files into <Vfs>\game\<TitleId>\. Throws if the
+# copy does not match the source.
+function Copy-UpdateData([string]$Root, [string]$Vfs, [string]$TitleId) {
+    $dst = Join-Path $Vfs "game\$TitleId"
+    New-Item -ItemType Directory -Force -Path (Join-Path $dst "USRDIR") | Out-Null
+    Remove-Item -LiteralPath (Join-Path $dst "USRDIR\patch") -Recurse -Force -ErrorAction SilentlyContinue
+    foreach ($f in "PARAM.SFO", "PS3LOGO.DAT") {
+        $s = Join-Path $Root $f
+        if (Test-Path -LiteralPath $s -PathType Leaf) { Copy-Item -LiteralPath $s -Destination (Join-Path $dst $f) -Force }
+    }
+    Copy-Item -LiteralPath (Join-Path $Root "USRDIR\patch") -Destination (Join-Path $dst "USRDIR\patch") -Recurse -Force
+    if (-not (Test-TreeCopied (Join-Path $Root "USRDIR\patch") (Join-Path $dst "USRDIR\patch"))) {
+        throw "The copied update files do not match the source. Run Setup again."
+    }
+    Get-ChildItem -LiteralPath $dst -Recurse -File | Where-Object { $_.IsReadOnly } | ForEach-Object { $_.IsReadOnly = $false }
+}
+
+# Remove what Copy-UpdateData added (the 1.0 game must not see the update's
+# files): USRDIR\patch, PS3LOGO.DAT, and PARAM.SFO only if it is the update's
+# (it has an APP_VER; one the game writes for its data cache has none). The
+# game's own data cache in the same folder is kept. Returns $true when
+# something was removed.
+function Remove-UpdateData([string]$Vfs, [string]$TitleId) {
+    $dst = Join-Path $Vfs "game\$TitleId"
+    $items = @("USRDIR\patch", "PS3LOGO.DAT")
+    if (Get-SfoValue (Join-Path $dst "PARAM.SFO") "APP_VER") { $items += "PARAM.SFO" }
+    $removed = $false
+    foreach ($i in $items) {
+        $p = Join-Path $dst $i
+        if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force; $removed = $true }
+    }
+    return $removed
+}
+
+# The game version an install was built for (<KitRoot>\.setup\game-version), or
+# $null for a fresh folder. Installs made before kit 1.2 have no stamp but a
+# finished EBOOT step: those are 1.0.
+function Get-InstalledGameVersion([string]$KitRoot) {
+    $p = Join-Path $KitRoot ".setup\game-version"
+    if (Test-Path -LiteralPath $p -PathType Leaf) { return ([string](Get-Content -LiteralPath $p -Raw)).Trim() }
+    if (Test-StepDone $KitRoot "eboot") { return "1.0" }
+    return $null
+}
+function Set-InstalledGameVersion([string]$KitRoot, [string]$Version) {
+    $p = Join-Path $KitRoot ".setup\game-version"
+    New-Item -ItemType Directory -Force -Path (Split-Path $p) | Out-Null
+    Set-Content -LiteralPath $p -Value $Version
+}
+
+# A kit for the other game version extracted over an install: forget the steps
+# that depend on the game version (update data, EBOOT, code generation,
+# compile) so Setup redoes them. Disc copy, runtime, launcher and saves are
+# kept. Returns $true when steps were reset.
+function Reset-StepsForGameVersion([string]$KitRoot, [string]$Version) {
+    $had = Get-InstalledGameVersion $KitRoot
+    if (-not $had -or $had -eq $Version) { return $false }
+    foreach ($m in "update", "eboot", "lift", "compile") { Clear-StepDone $KitRoot $m }
+    return $true
 }
 
 # Full path of a Python >= 3.10, or $null. The Microsoft Store "python" alias

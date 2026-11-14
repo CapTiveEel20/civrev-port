@@ -26,51 +26,62 @@ $expected = @(
     "civrev-port/CMakeLists.txt", "civrev-port/build.ps1", "civrev-port/LICENSE",
     "civrev-port/src/port/civrev_hle.cpp",
     "civrev-port/src/compat/dirent.h", "civrev-port/src/compat/unistd.h", "civrev-port/src/compat/LICENSE-tornado",
-    "civrev-port/tools/relift.ps1", "civrev-port/tools/fix_import_stub_toc.py", "civrev-port/tools/fix_inline_opd_funcs.py", "civrev-port/tools/patch_menu_assets.py",
+    "civrev-port/tools/relift.ps1", "civrev-port/tools/code_end.py", "civrev-port/tools/fix_import_stub_toc.py", "civrev-port/tools/fix_inline_opd_funcs.py", "civrev-port/tools/patch_menu_assets.py",
     "civrev-port/launcher/CivRev.c", "civrev-port/launcher/CivRev.rc", "civrev-port/launcher/build_launcher.ps1",
-    "civrev-port/setup/setup.ps1", "civrev-port/setup/kitlib.ps1", "civrev-port/setup/ps3recomp.lock"
+    "civrev-port/setup/setup.ps1", "civrev-port/setup/kitlib.ps1", "civrev-port/setup/ps3recomp.lock",
+    "civrev-port/setup/game-version.txt"
 ) | ForEach-Object { "CivRevPC/$_" } | Sort-Object
 
 # ---- refuses a dirty tree ----
 $dirty = Join-Path $repo "kit_dirty_test.tmp"
 Set-Content -LiteralPath $dirty "x"
 try {
-    $r = Invoke-MakeKit @("-Version", "dirtytest")
+    $r = Invoke-MakeKit @("-Version", "dirtytest", "-GameVersion", "1.0")
     Assert ($r.Code -eq 1) "dirty tree -> exit 1 (got $($r.Code))"
     Assert ($r.Out -match "commit your changes first") "dirty tree -> 'commit your changes first'"
-    Assert (-not (Test-Path (Join-Path $repo "dist\CivRevPC-dirtytest.zip"))) "dirty tree -> no zip"
+    Assert (-not (Test-Path (Join-Path $repo "dist\CivRevPC-dirtytest-game1.0.zip"))) "dirty tree -> no zip"
 } finally { Remove-Item -LiteralPath $dirty -Force }
 
-# ---- clean tree -> exact allowlist ----
-$zip = Join-Path $repo "dist\CivRevPC-test.zip"
-Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
-$r = Invoke-MakeKit @("-Version", "test")
-Assert ($r.Code -eq 0) "clean tree -> exit 0 (got $($r.Code)) $($r.Out)"
-Assert (Test-Path -LiteralPath $zip) "clean tree -> dist\CivRevPC-test.zip exists"
-if (Test-Path -LiteralPath $zip) {
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $z = [IO.Compression.ZipFile]::OpenRead($zip)
-    try {
-        $names = @($z.Entries | Where-Object { -not $_.FullName.EndsWith("/") } | ForEach-Object { $_.FullName } | Sort-Object)
-        $extra = @($names | Where-Object { $_ -notin $expected })
-        $miss = @($expected | Where-Object { $_ -notin $names })
-        Assert ($extra.Count -eq 0) "zip has no files outside the allowlist (extra: $($extra -join ', '))"
-        Assert ($miss.Count -eq 0) "zip has every allowlisted file (missing: $($miss -join ', '))"
-        $leaks = @()
-        $readme = ""
-        foreach ($e in $z.Entries) {
-            if ($e.FullName.EndsWith("/")) { continue }
-            $sr = New-Object IO.StreamReader($e.Open())
-            $text = $sr.ReadToEnd(); $sr.Dispose()
-            if ($text -match $leakPattern) { $leaks += $e.FullName }
-            if ($e.FullName -eq "CivRevPC/README-PLAYERS.txt") { $readme = $text }
-            if ($e.FullName -eq "CivRevPC/Setup.bat") { $bat = $text }
-        }
-        Assert ($leaks.Count -eq 0) "no personal paths or email in any file (found in: $($leaks -join ', '))"
-        Assert ($readme -match "F9" -and $readme -match "F11" -and $readme -match "auto_capture") "README-PLAYERS documents F9, F11, auto_capture"
-        Assert ($bat -match "`r`n") "Setup.bat has Windows line endings"
-    } finally { $z.Dispose() }
-    Remove-Item -LiteralPath $zip -Force
+# ---- -GameVersion is required and checked ----
+$r = Invoke-MakeKit @("-Version", "test", "-GameVersion", "2.0")
+Assert ($r.Code -ne 0) "unknown -GameVersion -> fails (got $($r.Code))"
+Assert (-not (Test-Path (Join-Path $repo "dist\CivRevPC-test-game2.0.zip"))) "unknown -GameVersion -> no zip"
+
+# ---- clean tree -> exact allowlist, one kit per game version ----
+foreach ($gv in "1.0", "1.30") {
+    $gvText = ""
+    $zip = Join-Path $repo "dist\CivRevPC-test-game$gv.zip"
+    Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+    $r = Invoke-MakeKit @("-Version", "test", "-GameVersion", $gv)
+    Assert ($r.Code -eq 0) "[$gv] clean tree -> exit 0 (got $($r.Code)) $($r.Out)"
+    Assert (Test-Path -LiteralPath $zip) "[$gv] clean tree -> dist\CivRevPC-test-game$gv.zip exists"
+    if (Test-Path -LiteralPath $zip) {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $z = [IO.Compression.ZipFile]::OpenRead($zip)
+        try {
+            $names = @($z.Entries | Where-Object { -not $_.FullName.EndsWith("/") } | ForEach-Object { $_.FullName } | Sort-Object)
+            $extra = @($names | Where-Object { $_ -notin $expected })
+            $miss = @($expected | Where-Object { $_ -notin $names })
+            Assert ($extra.Count -eq 0) "[$gv] zip has no files outside the allowlist (extra: $($extra -join ', '))"
+            Assert ($miss.Count -eq 0) "[$gv] zip has every allowlisted file (missing: $($miss -join ', '))"
+            $leaks = @()
+            $readme = ""
+            foreach ($e in $z.Entries) {
+                if ($e.FullName.EndsWith("/")) { continue }
+                $sr = New-Object IO.StreamReader($e.Open())
+                $text = $sr.ReadToEnd(); $sr.Dispose()
+                if ($text -match $leakPattern) { $leaks += $e.FullName }
+                if ($e.FullName -eq "CivRevPC/README-PLAYERS.txt") { $readme = $text }
+                if ($e.FullName -eq "CivRevPC/Setup.bat") { $bat = $text }
+                if ($e.FullName -eq "CivRevPC/civrev-port/setup/game-version.txt") { $gvText = $text }
+            }
+            Assert ($leaks.Count -eq 0) "[$gv] no personal paths or email in any file (found in: $($leaks -join ', '))"
+            Assert ($readme -match "F9" -and $readme -match "F11" -and $readme -match "auto_capture") "[$gv] README-PLAYERS documents F9, F11, auto_capture"
+            Assert ($bat -match "`r`n") "[$gv] Setup.bat has Windows line endings"
+            Assert ($gvText.Trim() -eq $gv) "[$gv] setup/game-version.txt says $gv (got '$($gvText.Trim())')"
+        } finally { $z.Dispose() }
+        Remove-Item -LiteralPath $zip -Force
+    }
 }
 if ($script:failed) { Write-Host "$script:failed FAILED" -ForegroundColor Red; exit 1 }
 Write-Host "ALL PASS"

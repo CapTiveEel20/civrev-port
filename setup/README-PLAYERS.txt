@@ -5,18 +5,37 @@ This kit turns YOUR OWN copy of the PS3 game into a native Windows program.
 It contains no game code, art or keys: everything game-specific is made on
 your PC from your disc. Only the European disc BLES00238 is supported.
 
+WHICH GAME VERSION THIS KIT BUILDS
+There are two kits; the zip name tells you which one you have:
+  CivRevPC-<kit version>-game1.0.zip    game version 1.0: the game as it is
+                                        on the disc. You need only your disc.
+  CivRevPC-<kit version>-game1.30.zip   game version 1.30: the game's official
+                                        update. You need your disc AND the
+                                        1.30 update package.
+(It is also written in civrev-port\setup\game-version.txt.)
+
 
 WHAT YOU NEED
 -------------
 1. Your game disc as an .iso file, or the extracted disc folder
    (the folder that contains PS3_GAME and PS3_DISC.SFB).
 
-2. The decrypted game program, EBOOT.elf. Make it with the RPCS3 emulator
-   (https://rpcs3.net): Utilities > Decrypt PS3 Binaries, choose the disc's
-   PS3_GAME\USRDIR\EBOOT.BIN. RPCS3 writes EBOOT.elf next to it.
-   (Setup refuses the still-encrypted EBOOT.BIN and other game versions.)
+2. Only for game version 1.30: the game update, installed in the RPCS3
+   emulator (https://rpcs3.net): File > Install Packages/Raps/Edats, choose
+   the 1.30 update package of the game (a .pkg file). RPCS3 installs it into
+   dev_hdd0\game\BLES00238 inside the RPCS3 folder: Setup asks for that
+   folder and copies the update's own files from it (about 7 MB).
 
-3. Two free programs that build the game: Visual Studio 2022 Build Tools
+3. The decrypted game program, EBOOT.elf. Make it with RPCS3:
+   Utilities > Decrypt PS3 Binaries, then choose
+     - game version 1.0:  the disc's PS3_GAME\USRDIR\EBOOT.BIN
+     - game version 1.30: the update's EBOOT.BIN, in the RPCS3 folder:
+                          dev_hdd0\game\BLES00238\USRDIR\EBOOT.BIN
+   (copy it to an ordinary folder first). RPCS3 writes EBOOT.elf next to it.
+   (Setup refuses the still-encrypted EBOOT.BIN, and an EBOOT.elf of the
+   other game version: it tells you which kit that one needs.)
+
+4. Two free programs that build the game: Visual Studio 2022 Build Tools
    (Microsoft's C++ compiler) and Python. You do not need to get them
    yourself: if they are missing, Setup offers to install them for you
    (answer Y). That downloads up to about 5 GB, takes 10 to 30 minutes, and
@@ -28,17 +47,18 @@ WHAT YOU NEED
    and "C++ CMake tools for Windows"; Python 3.10 or newer from
    https://www.python.org/downloads/ with "Add python.exe to PATH" ticked.)
 
-4. About 10 GB of free disk space where you extract this kit (plus about
+5. About 10 GB of free disk space where you extract this kit (plus about
    8 GB on C: if Setup installs the tools), and an internet connection.
 
-5. Windows 10 or 11, 64-bit.
+6. Windows 10 or 11, 64-bit.
 
 
 INSTALL
 -------
 1. Extract this whole zip to a folder you like (e.g. C:\Games\CivRevPC).
-2. Double-click Setup.bat. It asks for your .iso (or disc folder) and your
-   EBOOT.elf, then copies the disc, generates and compiles the game.
+2. Double-click Setup.bat. It asks for your .iso (or disc folder), for
+   game version 1.30 the installed update folder, and your EBOOT.elf, then
+   copies the disc, generates and compiles the game.
    On a fast PC this takes about 10 minutes; slower PCs take longer.
    While it works you see one progress line per step, for example
    "Compiling: 120 of 450 files (26%)". Leave the window open until it says
@@ -52,15 +72,31 @@ setup.log in the kit folder. Fix the problem and run Setup.bat again:
 finished steps are skipped.
 
 
-UPDATING FROM AN OLDER KIT (for example 1.0 -> 1.1)
----------------------------------------------------
+UPDATING FROM AN OLDER KIT (for example kit 1.1 -> 1.2)
+-------------------------------------------------------
 1. Extract the new zip to the same place as before, so its CivRevPC folder
    lands on top of your existing one ("Replace the files in the
    destination").
-2. Run Setup.bat again. It notices the new version, downloads the new
-   ps3recomp runtime and rebuilds the game; your disc copy is kept. It takes
-   about as long as the compile step did the first time.
+2. Run Setup.bat again. If the new kit uses a newer ps3recomp runtime, Setup
+   downloads it and rebuilds the game (about as long as the compile step
+   took the first time); otherwise it has nothing to redo. Your disc copy is
+   kept.
 3. Your saves in civrev-port\gamedata\ are kept.
+Use the newer kit for the SAME game version you have (kits 1.0 and 1.1
+built game version 1.0).
+
+
+SWITCHING BETWEEN GAME VERSION 1.0 AND 1.30
+-------------------------------------------
+1. Back up civrev-port\gamedata\ first (saves of one game version have not
+   been tested with the other).
+2. Extract the kit for the other game version on top of your CivRevPC folder
+   (as above) and run Setup.bat. It notices the change, asks for the
+   matching EBOOT.elf (and, for 1.30, the installed update folder) and
+   rebuilds the game. The disc copy is kept. Going back to 1.0 removes the
+   update's files from the game folder.
+Or keep both: extract the two kits into two different folders and run
+Setup.bat in each (about 10 GB each; each has its own saves).
 
 
 PLAY

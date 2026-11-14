@@ -29,6 +29,30 @@ function New-TestSfo([string]$Path, [string]$Id) {
     [IO.File]::WriteAllBytes($Path, $ms.ToArray())
 }
 
+# PARAM.SFO with several UTF-8 entries (ordered key -> value), like a real one.
+function New-TestSfoKeys([string]$Path, [Collections.Specialized.OrderedDictionary]$Values) {
+    $keys = New-Object IO.MemoryStream; $data = New-Object IO.MemoryStream
+    $entries = @()
+    foreach ($k in $Values.Keys) {
+        $v = [Text.Encoding]::UTF8.GetBytes([string]$Values[$k] + "`0")
+        $max = [int]([Math]::Ceiling($v.Length / 4.0) * 4)
+        $entries += , @([int]$keys.Position, $v.Length, $max, [int]$data.Position)
+        $kb = [Text.Encoding]::ASCII.GetBytes("$k`0"); $keys.Write($kb, 0, $kb.Length)
+        $data.Write($v, 0, $v.Length); $data.Write((New-Object byte[] ($max - $v.Length)), 0, $max - $v.Length)
+    }
+    while ($keys.Length % 4) { $keys.WriteByte(0) }
+    $keyOff = 0x14 + 16 * $entries.Count
+    $ms = New-Object IO.MemoryStream; $w = New-Object IO.BinaryWriter $ms
+    $w.Write([byte[]](0, 0x50, 0x53, 0x46)); $w.Write([uint32]0x101)
+    $w.Write([uint32]$keyOff); $w.Write([uint32]($keyOff + $keys.Length)); $w.Write([uint32]$entries.Count)
+    foreach ($e in $entries) {
+        $w.Write([uint16]$e[0]); $w.Write([uint16]0x0204); $w.Write([uint32]$e[1]); $w.Write([uint32]$e[2]); $w.Write([uint32]$e[3])
+    }
+    $w.Write($keys.ToArray()); $w.Write($data.ToArray()); $w.Flush()
+    New-Item -ItemType Directory -Force -Path (Split-Path $Path) | Out-Null
+    [IO.File]::WriteAllBytes($Path, $ms.ToArray())
+}
+
 function New-Bytes([string]$Path, [byte[]]$Head, [int]$Total = 64) {
     $b = New-Object byte[] $Total
     $Head.CopyTo($b, 0)
@@ -59,6 +83,104 @@ try {
     Assert ((Test-EbootFile "$tmp\elf.elf" $h) -eq "wrong-version") "Test-EbootFile other ELF -> wrong-version"
     $own = (Get-FileHash "$tmp\elf.elf" -Algorithm SHA256).Hash
     Assert ((Test-EbootFile "$tmp\elf.elf" $own) -eq "ok") "Test-EbootFile matching hash -> ok"
+
+    # ---- Get-SfoValue ----
+    New-TestSfoKeys "$tmp\upd\PARAM.SFO" ([ordered]@{ CATEGORY = "GD"; APP_VER = "01.30"; TITLE_ID = "BLES00238"; VERSION = "01.00" })
+    Assert ((Get-SfoValue "$tmp\upd\PARAM.SFO" "APP_VER") -eq "01.30") "Get-SfoValue APP_VER among several keys"
+    Assert ((Get-SfoTitleId "$tmp\upd\PARAM.SFO") -eq "BLES00238") "Get-SfoTitleId among several keys"
+    Assert ($null -eq (Get-SfoValue "$tmp\upd\PARAM.SFO" "NOPE")) "Get-SfoValue absent key -> null"
+    # Optional real files: CIVREV_UPDATE_DIR = installed 1.30 update (<RPCS3>\dev_hdd0\game\BLES00238),
+    # CIVREV_EBOOT_130 = decrypted 1.30 EBOOT.elf.
+    $realUpd = $env:CIVREV_UPDATE_DIR
+    if ($realUpd -and (Test-Path "$realUpd\PARAM.SFO")) { Assert ((Get-SfoValue "$realUpd\PARAM.SFO" "APP_VER") -eq "01.30") "Get-SfoValue real update PARAM.SFO -> 01.30" }
+    else { Write-Host "SKIP real update PARAM.SFO not present" }
+
+    # ---- Read-KitGameVersion ----
+    New-Item -ItemType Directory -Force "$tmp\kv" | Out-Null
+    Assert ((Read-KitGameVersion "$tmp\kv") -eq "1.0") "Read-KitGameVersion no file -> 1.0"
+    Set-Content "$tmp\kv\game-version.txt" "1.30"
+    Assert ((Read-KitGameVersion "$tmp\kv") -eq "1.30") "Read-KitGameVersion 1.30"
+    Set-Content "$tmp\kv\game-version.txt" "2.0"
+    $threw = $false; try { Read-KitGameVersion "$tmp\kv" | Out-Null } catch { $threw = $true }
+    Assert $threw "Read-KitGameVersion unknown version -> throws"
+
+    # ---- Get-EbootGameVersion ----
+    Assert ($null -eq (Get-EbootGameVersion "$tmp\elf.elf")) "Get-EbootGameVersion unknown ELF -> null"
+    Assert ($null -eq (Get-EbootGameVersion "$tmp\none.elf")) "Get-EbootGameVersion missing -> null"
+    $elf10 = Join-Path $PSScriptRoot "..\..\..\civrev-gamefiles\EBOOT.elf"   # default sibling layout
+    if (Test-Path $elf10) { Assert ((Get-EbootGameVersion $elf10) -eq "1.0") "Get-EbootGameVersion real 1.0 EBOOT" }
+    else { Write-Host "SKIP real 1.0 EBOOT not present" }
+    $elf130 = $env:CIVREV_EBOOT_130
+    if ($elf130 -and (Test-Path $elf130)) { Assert ((Get-EbootGameVersion $elf130) -eq "1.30") "Get-EbootGameVersion real 1.30 EBOOT" }
+    else { Write-Host "SKIP real 1.30 EBOOT not present" }
+
+    # ---- Resolve-UpdateRoot ----
+    Assert ((Resolve-UpdateRoot "$tmp\upd") -eq "$tmp\upd") "Resolve-UpdateRoot root"
+    Assert ((Resolve-UpdateRoot "$tmp\upd\USRDIR") -eq "$tmp\upd") "Resolve-UpdateRoot USRDIR -> root"
+    Assert ((Resolve-UpdateRoot "$tmp\upd\USRDIR\patch\") -eq "$tmp\upd") "Resolve-UpdateRoot USRDIR\patch\ -> root"
+
+    # ---- Test-UpdateFolder (synthetic update: 2 patch files, 30 bytes) ----
+    $v130 = $script:GameVersions["1.30"]
+    $savedFiles = $v130.PatchFiles; $savedBytes = $v130.PatchBytes
+    $v130.PatchFiles = 2; $v130.PatchBytes = 30
+    try {
+        Assert ((Test-UpdateFolder "$tmp\nothing" "BLES00238" "1.30") -eq "missing") "Test-UpdateFolder missing folder"
+        New-Item -ItemType Directory -Force "$tmp\empty" | Out-Null
+        Assert ((Test-UpdateFolder "$tmp\empty" "BLES00238" "1.30") -eq "no-sfo") "Test-UpdateFolder no PARAM.SFO"
+        New-TestSfoKeys "$tmp\us\PARAM.SFO" ([ordered]@{ APP_VER = "01.30"; TITLE_ID = "BLUS30130" })
+        Assert ((Test-UpdateFolder "$tmp\us" "BLES00238" "1.30") -eq "wrong-title") "Test-UpdateFolder other title"
+        # The game's own data cache folder (RPCS3 before installing the update): no APP_VER.
+        New-TestSfoKeys "$tmp\cache\PARAM.SFO" ([ordered]@{ CATEGORY = "GD"; TITLE_ID = "BLES00238"; VERSION = "01.00" })
+        Assert ((Test-UpdateFolder "$tmp\cache" "BLES00238" "1.30") -eq "wrong-version") "Test-UpdateFolder data cache only (no APP_VER) -> wrong-version"
+        Assert ((Test-UpdateFolder "$tmp\upd" "BLES00238" "1.30") -eq "no-patch") "Test-UpdateFolder no USRDIR\patch"
+        New-Item -ItemType Directory -Force "$tmp\upd\USRDIR\patch" | Out-Null
+        [IO.File]::WriteAllBytes("$tmp\upd\USRDIR\patch\a.xml", (New-Object byte[] 10))
+        Assert ((Test-UpdateFolder "$tmp\upd" "BLES00238" "1.30") -eq "incomplete") "Test-UpdateFolder file missing -> incomplete"
+        [IO.File]::WriteAllBytes("$tmp\upd\USRDIR\patch\b.dds", (New-Object byte[] 19))
+        Assert ((Test-UpdateFolder "$tmp\upd" "BLES00238" "1.30") -eq "incomplete") "Test-UpdateFolder wrong size -> incomplete"
+        [IO.File]::WriteAllBytes("$tmp\upd\USRDIR\patch\b.dds", (New-Object byte[] 20))
+        Assert ((Test-UpdateFolder "$tmp\upd" "BLES00238" "1.30") -eq "ok") "Test-UpdateFolder complete -> ok"
+    } finally { $v130.PatchFiles = $savedFiles; $v130.PatchBytes = $savedBytes }
+    if ($realUpd -and (Test-Path "$realUpd\USRDIR\patch")) { Assert ((Test-UpdateFolder $realUpd "BLES00238" "1.30") -eq "ok") "Test-UpdateFolder real installed 1.30 update -> ok" }
+    else { Write-Host "SKIP real installed update not present" }
+
+    # ---- Copy-UpdateData / Remove-UpdateData ----
+    $vfs = "$tmp\vfs"
+    $cache = "$vfs\game\BLES00238"
+    New-Item -ItemType Directory -Force "$cache\USRDIR" | Out-Null
+    Set-Content "$cache\USRDIR\Common0.FPK" "game data cache"
+    Set-Content "$tmp\upd\PS3LOGO.DAT" "logo"
+    Copy-UpdateData "$tmp\upd" $vfs "BLES00238"
+    Assert ((Get-SfoValue "$cache\PARAM.SFO" "APP_VER") -eq "01.30") "Copy-UpdateData copies the update's PARAM.SFO"
+    Assert ((Test-Path "$cache\PS3LOGO.DAT") -and (Test-TreeCopied "$tmp\upd\USRDIR\patch" "$cache\USRDIR\patch")) "Copy-UpdateData copies PS3LOGO.DAT and USRDIR\patch"
+    Copy-UpdateData "$tmp\upd" $vfs "BLES00238"
+    Assert (Test-TreeCopied "$tmp\upd\USRDIR\patch" "$cache\USRDIR\patch") "Copy-UpdateData twice -> same files, no nested patch\patch"
+    Assert (Remove-UpdateData $vfs "BLES00238") "Remove-UpdateData -> true"
+    Assert (-not (Test-Path "$cache\USRDIR\patch") -and -not (Test-Path "$cache\PS3LOGO.DAT") -and -not (Test-Path "$cache\PARAM.SFO")) "Remove-UpdateData removes patch, logo, update PARAM.SFO"
+    Assert (Test-Path "$cache\USRDIR\Common0.FPK") "Remove-UpdateData keeps the game's data cache"
+    Assert (-not (Remove-UpdateData $vfs "BLES00238")) "Remove-UpdateData nothing left -> false"
+    New-TestSfoKeys "$cache\PARAM.SFO" ([ordered]@{ CATEGORY = "GD"; TITLE_ID = "BLES00238" })
+    [void](Remove-UpdateData $vfs "BLES00238")
+    Assert (Test-Path "$cache\PARAM.SFO") "Remove-UpdateData keeps a PARAM.SFO without APP_VER (the game's own)"
+    Assert (-not (Remove-UpdateData "$tmp\novfs" "BLES00238")) "Remove-UpdateData no folder -> false"
+
+    # ---- Get/Set-InstalledGameVersion, Reset-StepsForGameVersion ----
+    $gk = "$tmp\gvkit"
+    Assert ($null -eq (Get-InstalledGameVersion $gk)) "Get-InstalledGameVersion fresh folder -> null"
+    Assert (-not (Reset-StepsForGameVersion $gk "1.30")) "Reset-StepsForGameVersion fresh folder -> false"
+    $vdeps = "update", "eboot", "lift", "compile"
+    $vkeep = "disc", "menuart", "ps3recomp-source", "ps3recomp", "launcher", "extras"
+    foreach ($m in $vdeps + $vkeep) { Set-StepDone $gk $m }
+    Assert ((Get-InstalledGameVersion $gk) -eq "1.0") "Get-InstalledGameVersion pre-1.2 install (no stamp, EBOOT done) -> 1.0"
+    Assert (-not (Reset-StepsForGameVersion $gk "1.0")) "Reset-StepsForGameVersion same version -> false"
+    Assert (Reset-StepsForGameVersion $gk "1.30") "Reset-StepsForGameVersion 1.0 install, 1.30 kit -> true"
+    Assert (@($vdeps | Where-Object { Test-StepDone $gk $_ }).Count -eq 0) "version switch clears update, eboot, lift, compile"
+    Assert (@($vkeep | Where-Object { Test-StepDone $gk $_ }).Count -eq $vkeep.Count) "version switch keeps disc, menuart, runtime, launcher, extras"
+    Set-InstalledGameVersion $gk "1.30"
+    Assert ((Get-InstalledGameVersion $gk) -eq "1.30") "Set/Get-InstalledGameVersion 1.30"
+    foreach ($m in $vdeps) { Set-StepDone $gk $m }
+    Assert (-not (Reset-StepsForGameVersion $gk "1.30")) "Reset-StepsForGameVersion 1.30 install, 1.30 kit -> false"
+    Assert (Reset-StepsForGameVersion $gk "1.0") "Reset-StepsForGameVersion 1.30 install, 1.0 kit -> true"
 
     # ---- Find-Python ----
     Assert ($null -eq (Find-Python @(, @('no-such-python-xyz')) @())) "Find-Python unknown command -> null"
