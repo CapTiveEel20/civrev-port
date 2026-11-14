@@ -15,6 +15,12 @@ game's PS3 program is translated into PC code, on your computer, during setup.
 > - This is a fan project. It is not affiliated with or endorsed by Firaxis Games,
 >   2K, Take-Two Interactive or Sony.
 
+> ### ℹ️ Supported game version
+> - The port currently supports **game version 1.0**: the program that is on the
+>   disc itself, with no updates installed.
+> - Support for **game version 1.3** (from the game update) is **in progress**.
+>   Until it is ready, use the `EBOOT` from your disc, not one from an update.
+
 ## What works today
 - **The whole game, start to finish:** full matches play without problems,
   including long ones.
